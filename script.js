@@ -4,6 +4,16 @@ let tariffeProvinciali = {};
 let regoleCalcolo = {};
 let currentCalculation = null;
 
+// Password hashing utility using Web Crypto API
+async function hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+}
+
 // Mock user data
 const users = {
     'logistica@esaving.eu': {
@@ -11,7 +21,7 @@ const users = {
         password: '123456',
         role: 'admin',
         name: 'Amministratore',
-        mustChangePassword: false
+        mustChangePassword: true
     }
 };
 
@@ -142,23 +152,40 @@ function showSection(section) {
     }
 }
 
-function handleLogin(e) {
+async function handleLogin(e) {
     e.preventDefault();
     
     const email = document.getElementById('email').value;
     const password = document.getElementById('password').value;
     
-    if (users[email] && users[email].password === password) {
-        currentUser = users[email];
-        localStorage.setItem('loggedInUser', JSON.stringify(currentUser));
-        updateUIForLoggedInUser();
+    if (users[email]) {
+        // Check if password is already hashed (64 characters) or plain text
+        const storedPassword = users[email].password;
+        let passwordMatch = false;
         
-        // Check if user must change password
-        if (currentUser.mustChangePassword) {
-            showChangePasswordModal();
+        if (storedPassword.length === 64) {
+            // Password is hashed, compare with hash
+            const hashedPassword = await hashPassword(password);
+            passwordMatch = storedPassword === hashedPassword;
         } else {
-            showSection('calculator');
-            showNotification('Login effettuato con successo!', 'success');
+            // Password is plain text, compare directly
+            passwordMatch = storedPassword === password;
+        }
+        
+        if (passwordMatch) {
+            currentUser = users[email];
+            localStorage.setItem('loggedInUser', JSON.stringify(currentUser));
+            updateUIForLoggedInUser();
+            
+            // Check if user must change password
+            if (currentUser.mustChangePassword) {
+                showChangePasswordModal();
+            } else {
+                showSection('calculator');
+                showNotification('Login effettuato con successo!', 'success');
+            }
+        } else {
+            showNotification('Credenziali non valide', 'error');
         }
     } else {
         showNotification('Credenziali non valide', 'error');
@@ -1343,7 +1370,7 @@ function addNewUser() {
     });
 }
 
-function saveNewUser() {
+async function saveNewUser() {
     const email = document.getElementById('newUserEmail').value;
     const name = document.getElementById('newUserName').value;
     const role = document.getElementById('newUserRole').value;
@@ -1353,9 +1380,12 @@ function saveNewUser() {
         return;
     }
     
+    // Hash the temporary password
+    const hashedPassword = await hashPassword('123456');
+    
     users[email] = {
         email: email,
-        password: '123456',
+        password: hashedPassword,
         role: role,
         name: name,
         mustChangePassword: true
@@ -1379,9 +1409,10 @@ function deleteUser(email) {
     }
 }
 
-function resetUserPassword(email) {
+async function resetUserPassword(email) {
     if (confirm(`Sei sicuro di voler resettare la password di ${email}? L'utente dovrà cambiarla al prossimo accesso.`)) {
-        users[email].password = '123456';
+        const hashedPassword = await hashPassword('123456');
+        users[email].password = hashedPassword;
         users[email].mustChangePassword = true;
         loadUsersTable();
         showNotification(`Password di ${email} resettata con successo!`, 'success');
@@ -1460,11 +1491,11 @@ function validatePassword(password) {
     return { valid: true };
 }
 
-function changePassword() {
+async function changePassword() {
     const newPassword = document.getElementById('newPassword').value;
     const confirmPassword = document.getElementById('confirmPassword').value;
     
-    // Verifica che le password corrispondano
+    // Verifica che le password corrispondono
     if (newPassword !== confirmPassword) {
         showNotification('Le password non corrispondono!', 'error');
         return;
@@ -1477,8 +1508,11 @@ function changePassword() {
         return;
     }
     
+    // Hash the new password
+    const hashedPassword = await hashPassword(newPassword);
+    
     // Aggiorna la password
-    currentUser.password = newPassword;
+    currentUser.password = hashedPassword;
     currentUser.mustChangePassword = false;
     users[currentUser.email] = currentUser;
     localStorage.setItem('loggedInUser', JSON.stringify(currentUser));
