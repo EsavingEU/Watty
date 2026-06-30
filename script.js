@@ -4,6 +4,17 @@ let tariffeProvinciali = {};
 let regoleCalcolo = {};
 let currentCalculation = null;
 
+// Load data from localStorage on page load
+function loadAllData() {
+    loadRates();
+    loadRules();
+    loadCarriers();
+    loadClients();
+    loadUsers();
+    loadShipments();
+    cleanupOldDDTFiles();
+}
+
 // Password hashing utility using Web Crypto API
 async function hashPassword(password) {
     const encoder = new TextEncoder();
@@ -21,9 +32,1281 @@ const users = {
         password: '123456',
         role: 'admin',
         name: 'Amministratore',
-        mustChangePassword: true
+        mustChangePassword: true,
+        userNumber: 0
     }
 };
+
+// Client data structure: codice_cliente -> codice_utente
+let clienti = {
+    // Example: '1001': 1, '1002': 1, '1003': 2
+};
+
+// Carriers data structure with API keys
+let vettori = {
+    // Example: {
+    //   'Bartolini': {
+    //     nome: 'Bartolini',
+    //     apiKey: 'your_api_key',
+    //     apiUrl: 'https://api.brt.it/...',
+    //     attivo: true
+    //   }
+    // }
+};
+
+// Shipments data structure
+let spedizioni = {
+    // Example: {
+    //   'SP001': {
+    //     id: 'SP001',
+    //     nrDDT: 'DDT001',
+    //     codiceCliente: '1001',
+    //     vettore: 'Bartolini',
+    //     dataPreparazioneMerce: '2024-01-15',
+    //     stato: 'In transito',
+    //     ultimoMagazzino: 'Milano',
+    //     dataConsegna: '2024-01-16',
+    //     linkTracking: 'https://...',
+    //     note: ''
+    //   }
+    // }
+};
+
+// Tracking Section Functions
+function loadTrackingSection() {
+    if (!currentUser) {
+        showNotification('Devi effettuare il login per accedere al tracking', 'error');
+        showSection('login');
+        return;
+    }
+
+    const adminView = document.getElementById('adminTrackingView');
+    const userView = document.getElementById('userTrackingView');
+
+    if (currentUser.role === 'admin') {
+        adminView.classList.remove('hidden');
+        userView.classList.add('hidden');
+        loadAllShipments();
+    } else {
+        adminView.classList.add('hidden');
+        userView.classList.remove('hidden');
+        loadUserShipments();
+    }
+}
+
+function loadAllShipments() {
+    const tbody = document.getElementById('shipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter out shipments delivered more than 10 days ago
+    const activeShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return !isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Populate carrier filter
+    populateCarrierFilter('filterVettore');
+
+    if (activeShipments.length === 0) {
+        document.getElementById('noShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    activeShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    activeShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800 mr-2" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function loadUserShipments() {
+    const tbody = document.getElementById('userShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const userNumber = currentUser.userNumber;
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments by user's clients and exclude delivered >10 days
+    const userShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        const clientUserNumber = clienti[shipment.codiceCliente];
+        const isDeliveredOld = isDeliveredMoreThan10Days(shipment);
+        return clientUserNumber === userNumber && !isDeliveredOld;
+    });
+
+    // Populate carrier filter
+    populateCarrierFilter('filterVettoreUser');
+
+    if (userShipments.length === 0) {
+        document.getElementById('noUserShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noUserShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    userShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    userShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function isDeliveredMoreThan10Days(shipment) {
+    if (shipment.stato !== 'Consegnato' || !shipment.dataConsegna) {
+        return false;
+    }
+
+    const deliveryDate = new Date(shipment.dataConsegna);
+    const today = new Date();
+    const diffTime = Math.abs(today - deliveryDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return diffDays > 10;
+}
+
+function loadDeliveredShipments() {
+    const tbody = document.getElementById('deliveredShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments delivered more than 10 days ago
+    const deliveredShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Populate carrier filter
+    populateCarrierFilter('filterVettoreDelivered');
+
+    if (deliveredShipments.length === 0) {
+        document.getElementById('noDeliveredShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noDeliveredShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    deliveredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    deliveredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-only">
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function filterDeliveredShipments() {
+    const searchTerm = document.getElementById('searchDeliveredShipments').value.toLowerCase();
+    const vettoreFilter = document.getElementById('filterVettoreDelivered').value;
+    const dataDaFilter = document.getElementById('filterDataDaDelivered').value;
+    const dataAFilter = document.getElementById('filterDataADelivered').value;
+
+    const tbody = document.getElementById('deliveredShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments delivered more than 10 days ago
+    const deliveredShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Apply filters
+    const filteredShipments = deliveredShipments.filter(id => {
+        const shipment = spedizioni[id];
+
+        // Search filter
+        const matchesSearch = !searchTerm ||
+            shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            shipment.codiceCliente.toLowerCase().includes(searchTerm) ||
+            shipment.vettore.toLowerCase().includes(searchTerm);
+
+        // Carrier filter
+        const matchesVettore = !vettoreFilter || shipment.vettore === vettoreFilter;
+
+        // Date filter (from)
+        let matchesDataDa = true;
+        if (dataDaFilter && shipment.dataConsegna) {
+            matchesDataDa = new Date(shipment.dataConsegna) >= new Date(dataDaFilter);
+        }
+
+        // Date filter (to)
+        let matchesDataA = true;
+        if (dataAFilter && shipment.dataConsegna) {
+            matchesDataA = new Date(shipment.dataConsegna) <= new Date(dataAFilter);
+        }
+
+        return matchesSearch && matchesVettore && matchesDataDa && matchesDataA;
+    });
+
+    if (filteredShipments.length === 0) {
+        document.getElementById('noDeliveredShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noDeliveredShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    filteredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    filteredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-only">
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function populateCarrierFilter(filterId) {
+    const filter = document.getElementById(filterId);
+    if (!filter) return;
+
+    // Get unique carriers from shipments
+    const uniqueCarriers = [...new Set(Object.values(spedizioni).map(s => s.vettore).filter(v => v))];
+
+    // Save current selection
+    const currentValue = filter.value;
+
+    // Clear options except first
+    filter.innerHTML = '<option value="">Tutti</option>';
+
+    // Add carrier options
+    uniqueCarriers.forEach(carrier => {
+        const option = document.createElement('option');
+        option.value = carrier;
+        option.textContent = carrier;
+        filter.appendChild(option);
+    });
+
+    // Restore selection if still valid
+    if (uniqueCarriers.includes(currentValue)) {
+        filter.value = currentValue;
+    }
+}
+
+function filterShipments() {
+    const searchTerm = document.getElementById('searchShipments').value.toLowerCase();
+    const statoFilter = document.getElementById('filterStato').value;
+    const vettoreFilter = document.getElementById('filterVettore').value;
+    const dataDaFilter = document.getElementById('filterDataDa').value;
+
+    const tbody = document.getElementById('shipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter out shipments delivered more than 10 days ago
+    const activeShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return !isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Apply filters
+    const filteredShipments = activeShipments.filter(id => {
+        const shipment = spedizioni[id];
+
+        // Search filter
+        const matchesSearch = !searchTerm ||
+            shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            shipment.codiceCliente.toLowerCase().includes(searchTerm) ||
+            shipment.vettore.toLowerCase().includes(searchTerm);
+
+        // Status filter
+        const matchesStato = !statoFilter || shipment.stato === statoFilter;
+
+        // Carrier filter
+        const matchesVettore = !vettoreFilter || shipment.vettore === vettoreFilter;
+
+        // Date filter
+        let matchesData = true;
+        if (dataDaFilter && shipment.dataPreparazioneMerce) {
+            matchesData = new Date(shipment.dataPreparazioneMerce) >= new Date(dataDaFilter);
+        }
+
+        return matchesSearch && matchesStato && matchesVettore && matchesData;
+    });
+
+    if (filteredShipments.length === 0) {
+        document.getElementById('noShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    filteredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    filteredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function filterUserShipments() {
+    const searchTerm = document.getElementById('searchShipmentsUser').value.toLowerCase();
+    const statoFilter = document.getElementById('filterStatoUser').value;
+    const vettoreFilter = document.getElementById('filterVettoreUser').value;
+    const dataDaFilter = document.getElementById('filterDataDaUser').value;
+
+    const tbody = document.getElementById('userShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const userNumber = currentUser.userNumber;
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments by user's clients and exclude delivered >10 days
+    const userShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        const clientUserNumber = clienti[shipment.codiceCliente];
+        const isDeliveredOld = isDeliveredMoreThan10Days(shipment);
+        return clientUserNumber === userNumber && !isDeliveredOld;
+    });
+
+    // Apply filters
+    const filteredShipments = userShipments.filter(id => {
+        const shipment = spedizioni[id];
+
+        // Search filter
+        const matchesSearch = !searchTerm ||
+            shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            shipment.codiceCliente.toLowerCase().includes(searchTerm) ||
+            shipment.vettore.toLowerCase().includes(searchTerm);
+
+        // Status filter
+        const matchesStato = !statoFilter || shipment.stato === statoFilter;
+
+        // Carrier filter
+        const matchesVettore = !vettoreFilter || shipment.vettore === vettoreFilter;
+
+        // Date filter
+        let matchesData = true;
+        if (dataDaFilter && shipment.dataPreparazioneMerce) {
+            matchesData = new Date(shipment.dataPreparazioneMerce) >= new Date(dataDaFilter);
+        }
+
+        return matchesSearch && matchesStato && matchesVettore && matchesData;
+    });
+
+    if (filteredShipments.length === 0) {
+        document.getElementById('noUserShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noUserShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    filteredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    filteredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function addNewShipment() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    // Get available carriers
+    const carrierOptions = Object.keys(vettori).map(nome =>
+        `<option value="${nome}">${nome}</option>`
+    ).join('');
+
+    content.innerHTML = `
+        <form id="newShipmentForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuova Spedizione</h4>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Codice Cliente</label>
+                    <input type="text" id="newShipmentCodiceCliente" required class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" placeholder="Codice cliente (es. 1001)" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nr. DDT</label>
+                    <input type="text" id="newShipmentNrDDT" required class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" placeholder="Nr. DDT" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Vettore</label>
+                    <select id="newShipmentVettore" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="">Seleziona vettore</option>
+                        ${carrierOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Preparazione Merce</label>
+                    <input type="date" id="newShipmentDataPreparazione" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Magazzino</label>
+                    <input type="text" id="newShipmentMagazzino" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" placeholder="Magazzino" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
+                    <input type="url" id="newShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="https://...">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Stato</label>
+                    <select id="newShipmentStato" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="Preparato">Preparato</option>
+                        <option value="In magazzino">In magazzino</option>
+                        <option value="Prenotato">Prenotato</option>
+                        <option value="In consegna">In consegna</option>
+                        <option value="Consegnato">Consegnato</option>
+                    </select>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Note</label>
+                    <textarea id="newShipmentNote" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" rows="3" placeholder="Note aggiuntive" style="text-transform: uppercase;"></textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">File DDT (PDF)</label>
+                    <input type="file" id="newShipmentDDTFile" accept=".pdf" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <p class="text-xs text-gray-500 mt-1">Carica il file PDF del DDT (opzionale)</p>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Spedizione
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('newShipmentForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewShipment();
+    });
+}
+
+async function saveNewShipment() {
+    const codiceCliente = document.getElementById('newShipmentCodiceCliente').value;
+    const nrDDT = document.getElementById('newShipmentNrDDT').value;
+    const vettore = document.getElementById('newShipmentVettore').value;
+    const dataPreparazioneMerce = document.getElementById('newShipmentDataPreparazione').value;
+    const magazzino = document.getElementById('newShipmentMagazzino').value;
+    const linkTracking = document.getElementById('newShipmentLinkTracking').value;
+    const stato = document.getElementById('newShipmentStato').value;
+    const note = document.getElementById('newShipmentNote').value;
+    const ddtFile = document.getElementById('newShipmentDDTFile').files[0];
+
+    let ddtBase64 = '';
+    if (ddtFile) {
+        ddtBase64 = await readFileAsBase64(ddtFile);
+    }
+
+    // Generate unique shipment ID
+    const shipmentId = 'SP' + Date.now().toString().slice(-6);
+
+    spedizioni[shipmentId] = {
+        id: shipmentId,
+        nrDDT: nrDDT,
+        codiceCliente: codiceCliente,
+        vettore: vettore,
+        dataPreparazioneMerce: dataPreparazioneMerce,
+        stato: stato,
+        ultimoMagazzino: magazzino,
+        dataConsegna: '',
+        linkTracking: linkTracking,
+        note: note,
+        ddtFile: ddtBase64
+    };
+
+    saveShipments();
+    closeRateModal();
+    loadAllShipments();
+    showNotification('Spedizione aggiunta con successo!', 'success');
+}
+
+function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function editShipment(id) {
+    const shipment = spedizioni[id];
+    if (!shipment) return;
+
+    // Check if user is admin for delivered shipments >10 days
+    if (isDeliveredMoreThan10Days(shipment)) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('Solo gli amministratori possono modificare spedizioni consegnate da più di 10 giorni', 'error');
+            return;
+        }
+    }
+
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <form id="editShipmentForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Modifica Spedizione ${id}</h4>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Codice Cliente</label>
+                    <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.codiceCliente}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nr. DDT</label>
+                    <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.nrDDT}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Vettore</label>
+                    <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.vettore}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Preparazione Merce</label>
+                    <input type="date" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.dataPreparazioneMerce}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Magazzino</label>
+                    <input type="text" id="editShipmentMagazzino" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" value="${shipment.ultimoMagazzino}" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Consegna</label>
+                    <input type="date" id="editShipmentDataConsegna" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.dataConsegna || ''}">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Stato</label>
+                    <select id="editShipmentStato" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="Preparato" ${shipment.stato === 'Preparato' ? 'selected' : ''}>Preparato</option>
+                        <option value="In magazzino" ${shipment.stato === 'In magazzino' ? 'selected' : ''}>In magazzino</option>
+                        <option value="Prenotato" ${shipment.stato === 'Prenotato' ? 'selected' : ''}>Prenotato</option>
+                        <option value="In consegna" ${shipment.stato === 'In consegna' ? 'selected' : ''}>In consegna</option>
+                        <option value="Consegnato" ${shipment.stato === 'Consegnato' ? 'selected' : ''}>Consegnato</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
+                    <input type="url" id="editShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.linkTracking || ''}">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Note</label>
+                    <textarea id="editShipmentNote" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" rows="3" style="text-transform: uppercase;">${shipment.note || ''}</textarea>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva Modifiche
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('editShipmentForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveShipmentEdit(id);
+    });
+}
+
+function saveShipmentEdit(id) {
+    spedizioni[id] = {
+        id: id,
+        nrDDT: spedizioni[id].nrDDT,
+        codiceCliente: spedizioni[id].codiceCliente,
+        vettore: spedizioni[id].vettore,
+        dataPreparazioneMerce: spedizioni[id].dataPreparazioneMerce,
+        stato: document.getElementById('editShipmentStato').value,
+        ultimoMagazzino: document.getElementById('editShipmentMagazzino').value,
+        dataConsegna: document.getElementById('editShipmentDataConsegna').value,
+        linkTracking: document.getElementById('editShipmentLinkTracking').value,
+        note: document.getElementById('editShipmentNote').value
+    };
+
+    saveShipments();
+    closeRateModal();
+    loadAllShipments();
+    showNotification('Spedizione modificata con successo!', 'success');
+}
+
+function deleteShipment(id) {
+    const shipment = spedizioni[id];
+    if (!shipment) return;
+
+    // Check if user is admin for delivered shipments >10 days
+    if (isDeliveredMoreThan10Days(shipment)) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('Solo gli amministratori possono eliminare spedizioni consegnate da più di 10 giorni', 'error');
+            return;
+        }
+    }
+
+    if (confirm(`Sei sicuro di voler eliminare la spedizione ${id}?`)) {
+        delete spedizioni[id];
+        saveShipments();
+        loadAllShipments();
+        showNotification('Spedizione eliminata con successo!', 'success');
+    }
+}
+
+function viewDDT(id) {
+    const shipment = spedizioni[id];
+    if (!shipment || !shipment.ddtFile) {
+        showNotification('File DDT non disponibile', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">DDT - ${shipment.nrDDT}</h4>
+                <p class="text-sm text-gray-600 mt-2">Codice Cliente: ${shipment.codiceCliente}</p>
+            </div>
+
+            <div class="w-full h-96 border border-gray-300 rounded-lg overflow-hidden">
+                <iframe src="${shipment.ddtFile}" class="w-full h-full" frameborder="0"></iframe>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Chiudi
+                </button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function cleanupOldDDTFiles() {
+    let cleanedCount = 0;
+    Object.keys(spedizioni).forEach(id => {
+        const shipment = spedizioni[id];
+        if (shipment.ddtFile && isDeliveredMoreThan10Days(shipment)) {
+            delete shipment.ddtFile;
+            cleanedCount++;
+        }
+    });
+
+    if (cleanedCount > 0) {
+        saveShipments();
+    }
+}
+
+function shareTracking(link) {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Condividi Link Tracking</h4>
+                <p class="text-sm text-gray-600 mt-2">Scegli come condividere il link</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="shareViaWhatsApp('${link}')" class="flex items-center justify-center space-x-2 bg-green-500 text-white px-4 py-3 rounded-lg hover:bg-green-600 transition">
+                    <i class="fab fa-whatsapp text-xl"></i>
+                    <span>WhatsApp</span>
+                </button>
+                <button onclick="shareViaEmail('${link}')" class="flex items-center justify-center space-x-2 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition">
+                    <i class="fas fa-envelope text-xl"></i>
+                    <span>Email</span>
+                </button>
+                <button onclick="shareViaTelegram('${link}')" class="flex items-center justify-center space-x-2 bg-blue-400 text-white px-4 py-3 rounded-lg hover:bg-blue-500 transition">
+                    <i class="fab fa-telegram text-xl"></i>
+                    <span>Telegram</span>
+                </button>
+                <button onclick="copyLink('${link}')" class="flex items-center justify-center space-x-2 bg-gray-500 text-white px-4 py-3 rounded-lg hover:bg-gray-600 transition">
+                    <i class="fas fa-copy text-xl"></i>
+                    <span>Copia Link</span>
+                </button>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Chiudi
+                </button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function shareViaWhatsApp(link) {
+    const text = `Ecco il link di tracking della spedizione: ${link}`;
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(whatsappUrl, '_blank');
+}
+
+function shareViaEmail(link) {
+    const subject = 'Tracking Spedizione';
+    const body = `Ecco il link di tracking della spedizione: ${link}`;
+    const mailtoUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailtoUrl;
+}
+
+function shareViaTelegram(link) {
+    const text = `Ecco il link di tracking della spedizione: ${link}`;
+    const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+    window.open(telegramUrl, '_blank');
+}
+
+function copyLink(link) {
+    navigator.clipboard.writeText(link).then(() => {
+        showNotification('Link copiato negli appunti!', 'success');
+        closeRateModal();
+    }).catch(() => {
+        showNotification('Errore nella copia del link', 'error');
+    });
+}
+
+function uploadClientsCSV() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Carica CSV Clienti</h4>
+                <p class="text-sm text-gray-600 mt-2">Il file CSV deve avere il formato: codice_cliente,codice_utente</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Seleziona file CSV</label>
+                <input type="file" id="clientsCSVFile" accept=".csv" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+            </div>
+
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p class="text-sm text-blue-800 font-semibold mb-2">Formato CSV:</p>
+                <p class="text-sm text-blue-700">codice_cliente,codice_utente</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1001,1</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1002,1</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1003,2</p>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="button" onclick="processClientsCSV()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-upload mr-2"></i> Carica CSV
+                </button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function processClientsCSV() {
+    const fileInput = document.getElementById('clientsCSVFile');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        showNotification('Seleziona un file CSV', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split('\n');
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        lines.forEach((line, index) => {
+            if (index === 0 && line.toLowerCase().includes('codice')) {
+                // Skip header if present
+                return;
+            }
+
+            // Skip empty lines
+            if (!line.trim()) {
+                return;
+            }
+
+            // Detect separator (try ; first, then ,)
+            const separator = line.includes(';') ? ';' : ',';
+            const parts = line.split(separator);
+
+            if (parts.length >= 2) {
+                const codiceCliente = parts[0].trim();
+                const codiceUtente = parseInt(parts[1].trim());
+
+                if (codiceCliente && !isNaN(codiceUtente)) {
+                    clienti[codiceCliente] = codiceUtente;
+                    successCount++;
+                } else {
+                    errorCount++;
+                }
+            }
+        });
+
+        saveClients();
+        closeRateModal();
+        loadClientsTable();
+        showNotification(`CSV caricato: ${successCount} clienti aggiunti, ${errorCount} errori`, successCount > 0 ? 'success' : 'warning');
+    };
+
+    reader.readAsText(file);
+}
+
+function loadClientsTable() {
+    const tbody = document.getElementById('clientsTableBody');
+    tbody.innerHTML = '';
+
+    const clientCodes = Object.keys(clienti);
+
+    if (clientCodes.length === 0) {
+        document.getElementById('noClients').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noClients').classList.add('hidden');
+
+    clientCodes.forEach(codiceCliente => {
+        const codiceUtente = clienti[codiceCliente];
+        const row = document.createElement('tr');
+        row.className = 'editable-rate';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${codiceUtente}</td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function loadCarriersTable() {
+    const tbody = document.getElementById('carriersTableBody');
+    tbody.innerHTML = '';
+
+    const carrierNames = Object.keys(vettori);
+
+    if (carrierNames.length === 0) {
+        document.getElementById('noCarriers').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noCarriers').classList.add('hidden');
+
+    carrierNames.forEach(nome => {
+        const carrier = vettori[nome];
+        const row = document.createElement('tr');
+        row.className = 'editable-rate';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${carrier.nome}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${carrier.apiKey ? '***' + carrier.apiKey.slice(-4) : '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${carrier.apiUrl || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <span class="${carrier.attivo ? 'text-green-600' : 'text-red-600'}">${carrier.attivo ? 'Sì' : 'No'}</span>
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <button onclick="editCarrier('${nome}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteCarrier('${nome}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function addNewCarrier() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <form id="newCarrierForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuovo Vettore</h4>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Vettore</label>
+                    <input type="text" id="newCarrierNome" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. Bartolini">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API Key</label>
+                    <input type="text" id="newCarrierApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Chiave API (opzionale)">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API URL</label>
+                    <input type="url" id="newCarrierApiUrl" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="URL API (opzionale)">
+                </div>
+                <div>
+                    <label class="flex items-center">
+                        <input type="checkbox" id="newCarrierAttivo" checked class="mr-2">
+                        <span class="text-sm font-medium text-gray-700">Attivo</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Vettore
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('newCarrierForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewCarrier();
+    });
+}
+
+function saveNewCarrier() {
+    const nome = document.getElementById('newCarrierNome').value;
+    const apiKey = document.getElementById('newCarrierApiKey').value;
+    const apiUrl = document.getElementById('newCarrierApiUrl').value;
+    const attivo = document.getElementById('newCarrierAttivo').checked;
+
+    vettori[nome] = {
+        nome: nome,
+        apiKey: apiKey,
+        apiUrl: apiUrl,
+        attivo: attivo
+    };
+
+    saveCarriers();
+    closeRateModal();
+    loadCarriersTable();
+    showNotification('Vettore aggiunto con successo!', 'success');
+}
+
+function editCarrier(nome) {
+    const carrier = vettori[nome];
+    if (!carrier) return;
+
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <form id="editCarrierForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Modifica Vettore ${nome}</h4>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Vettore</label>
+                    <input type="text" id="editCarrierNome" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${carrier.nome}">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API Key</label>
+                    <input type="text" id="editCarrierApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${carrier.apiKey || ''}">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API URL</label>
+                    <input type="url" id="editCarrierApiUrl" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${carrier.apiUrl || ''}">
+                </div>
+                <div>
+                    <label class="flex items-center">
+                        <input type="checkbox" id="editCarrierAttivo" ${carrier.attivo ? 'checked' : ''} class="mr-2">
+                        <span class="text-sm font-medium text-gray-700">Attivo</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva Modifiche
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('editCarrierForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveCarrierEdit(nome);
+    });
+}
+
+function saveCarrierEdit(oldNome) {
+    const nome = document.getElementById('editCarrierNome').value;
+    const apiKey = document.getElementById('editCarrierApiKey').value;
+    const apiUrl = document.getElementById('editCarrierApiUrl').value;
+    const attivo = document.getElementById('editCarrierAttivo').checked;
+
+    // Remove old entry if name changed
+    if (oldNome !== nome) {
+        delete vettori[oldNome];
+    }
+
+    vettori[nome] = {
+        nome: nome,
+        apiKey: apiKey,
+        apiUrl: apiUrl,
+        attivo: attivo
+    };
+
+    saveCarriers();
+    closeRateModal();
+    loadCarriersTable();
+    showNotification('Vettore modificato con successo!', 'success');
+}
+
+function deleteCarrier(nome) {
+    if (confirm(`Sei sicuro di voler eliminare il vettore ${nome}?`)) {
+        delete vettori[nome];
+        saveCarriers();
+        loadCarriersTable();
+        showNotification('Vettore eliminato con successo!', 'success');
+    }
+}
+
+// Auto-update tracking every 10 minutes if API keys are available
+let autoUpdateInterval = null;
+
+function startAutoUpdateTracking() {
+    // Clear existing interval if any
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+    }
+
+    // Check if there are active carriers with API keys
+    const hasActiveCarriersWithAPI = Object.values(vettori).some(carrier =>
+        carrier.attivo && carrier.apiKey && carrier.apiUrl
+    );
+
+    if (!hasActiveCarriersWithAPI) {
+        console.log('Nessun vettore attivo con API configurata. Aggiornamento automatico disabilitato.');
+        return;
+    }
+
+    // Update immediately
+    updateTrackingFromAPIs();
+
+    // Set interval for every 10 minutes (600000 ms)
+    autoUpdateInterval = setInterval(updateTrackingFromAPIs, 600000);
+    console.log('Aggiornamento automatico tracking attivato (ogni 10 minuti)');
+}
+
+function updateTrackingFromAPIs() {
+    console.log('Aggiornamento tracking dalle API...');
+
+    // For each shipment with a carrier that has API configured
+    Object.keys(spedizioni).forEach(shipmentId => {
+        const shipment = spedizioni[shipmentId];
+        const carrier = vettori[shipment.vettore];
+
+        if (carrier && carrier.attivo && carrier.apiKey && carrier.apiUrl) {
+            // In a real implementation, this would make an API call to the carrier
+            // For now, we'll log that the update would happen
+            console.log(`Aggiornamento spedizione ${shipmentId} tramite API ${carrier.nome}`);
+            // TODO: Implement actual API calls to carrier endpoints
+            // This would require specific implementation for each carrier's API
+        }
+    });
+}
+
+function stopAutoUpdateTracking() {
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+        autoUpdateInterval = null;
+        console.log('Aggiornamento automatico tracking disabilitato');
+    }
+}
 
 // Default rates table - can be overridden by admin
 const defaultTariffeProvinciali = {
@@ -62,8 +1345,7 @@ const defaultRegoleCalcolo = {
 
 // Initialize application
 document.addEventListener('DOMContentLoaded', function() {
-    loadRates();
-    loadRules();
+    loadAllData();
     populateProvinces();
     
     // Check if user is already logged in
@@ -71,10 +1353,9 @@ document.addEventListener('DOMContentLoaded', function() {
     if (loggedInUser) {
         currentUser = JSON.parse(loggedInUser);
         updateUIForLoggedInUser();
-        showSection('calculator');
-    } else {
-        showSection('login');
     }
+    // Always show calculator as main page
+    showSection('calculator');
     
     // File input handlers
     const csvFileInput = document.getElementById('csvFileInput');
@@ -137,7 +1418,9 @@ function showSection(section) {
     document.getElementById('loginSection').classList.add('hidden');
     document.getElementById('adminSection').classList.add('hidden');
     document.getElementById('savedSection').classList.add('hidden');
-    
+    document.getElementById('trackingSection').classList.add('hidden');
+    document.getElementById('deliveredSection').classList.add('hidden');
+
     // Show selected section
     if (section === 'calculator') {
         document.getElementById('calculatorSection').classList.remove('hidden');
@@ -149,6 +1432,12 @@ function showSection(section) {
     } else if (section === 'saved') {
         document.getElementById('savedSection').classList.remove('hidden');
         loadSavedCalculations();
+    } else if (section === 'tracking') {
+        document.getElementById('trackingSection').classList.remove('hidden');
+        loadTrackingSection();
+    } else if (section === 'delivered') {
+        document.getElementById('deliveredSection').classList.remove('hidden');
+        loadDeliveredShipments();
     }
 }
 
@@ -197,16 +1486,29 @@ function updateUIForLoggedInUser() {
     document.getElementById('userMenuBtn').classList.remove('hidden');
     document.getElementById('logoutBtn').classList.remove('hidden');
     document.getElementById('userName').textContent = currentUser.name;
-    
+
     // Show admin link if user is admin
     if (currentUser.role === 'admin') {
         document.getElementById('adminLinkBtn').classList.remove('hidden');
+        // Show admin-only columns
+        document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+    } else {
+        // Hide admin-only columns
+        document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
     }
-    
+
     // Show saved calculations link
     document.getElementById('savedCalculationsLink').classList.remove('hidden');
     document.getElementById('savedCalculationsLinkMobile').classList.remove('hidden');
-    
+
+    // Show tracking link
+    document.getElementById('trackingLink').classList.remove('hidden');
+    document.getElementById('trackingLinkMobile').classList.remove('hidden');
+
+    // Show delivered link
+    document.getElementById('deliveredLink').classList.remove('hidden');
+    document.getElementById('deliveredLinkMobile').classList.remove('hidden');
+
     // Hide login link
     document.querySelector('nav a[href="#login"]').classList.add('hidden');
 }
@@ -214,15 +1516,19 @@ function updateUIForLoggedInUser() {
 function logout() {
     currentUser = null;
     localStorage.removeItem('loggedInUser');
-    
+
     // Update UI
     document.getElementById('userMenuBtn').classList.add('hidden');
     document.getElementById('logoutBtn').classList.add('hidden');
     document.getElementById('adminLinkBtn').classList.add('hidden');
     document.getElementById('savedCalculationsLink').classList.add('hidden');
     document.getElementById('savedCalculationsLinkMobile').classList.add('hidden');
+    document.getElementById('trackingLink').classList.add('hidden');
+    document.getElementById('trackingLinkMobile').classList.add('hidden');
+    document.getElementById('deliveredLink').classList.add('hidden');
+    document.getElementById('deliveredLinkMobile').classList.add('hidden');
     document.querySelector('nav a[href="#login"]').classList.remove('hidden');
-    
+
     showSection('login');
     showNotification('Logout effettuato', 'info');
 }
@@ -567,29 +1873,33 @@ function showAdminTab(tabName) {
     document.querySelectorAll('.admin-tab-content').forEach(content => {
         content.classList.remove('active');
     });
-    
+
     // Remove active class from all tabs
     document.querySelectorAll('.admin-tab-btn').forEach(btn => {
         btn.classList.remove('active');
     });
-    
+
     // Show selected tab content
     const content = document.getElementById(tabName + 'TabContent');
     if (content) {
         content.classList.add('active');
     }
-    
+
     // Add active class to selected tab
     const tab = document.getElementById(tabName + 'Tab');
     if (tab) {
         tab.classList.add('active');
     }
-    
+
     // Load tab-specific content
     if (tabName === 'rates') {
         loadRatesTable();
     } else if (tabName === 'rules') {
         loadRulesTable();
+    } else if (tabName === 'carriers') {
+        loadCarriersTable();
+    } else if (tabName === 'clients') {
+        loadClientsTable();
     } else if (tabName === 'users') {
         loadUsersTable();
     }
@@ -629,6 +1939,50 @@ function loadRules() {
 
 function saveRules() {
     localStorage.setItem('regoleCalcolo', JSON.stringify(regoleCalcolo));
+}
+
+function loadCarriers() {
+    const savedCarriers = localStorage.getItem('vettori');
+    if (savedCarriers) {
+        vettori = JSON.parse(savedCarriers);
+    }
+}
+
+function saveCarriers() {
+    localStorage.setItem('vettori', JSON.stringify(vettori));
+}
+
+function loadClients() {
+    const savedClients = localStorage.getItem('clienti');
+    if (savedClients) {
+        clienti = JSON.parse(savedClients);
+    }
+}
+
+function saveClients() {
+    localStorage.setItem('clienti', JSON.stringify(clienti));
+}
+
+function loadUsers() {
+    const savedUsers = localStorage.getItem('users');
+    if (savedUsers) {
+        Object.assign(users, JSON.parse(savedUsers));
+    }
+}
+
+function saveUsers() {
+    localStorage.setItem('users', JSON.stringify(users));
+}
+
+function loadShipments() {
+    const savedShipments = localStorage.getItem('spedizioni');
+    if (savedShipments) {
+        spedizioni = JSON.parse(savedShipments);
+    }
+}
+
+function saveShipments() {
+    localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
 }
 
 function loadRatesTable() {
@@ -1289,7 +2643,7 @@ function downloadTemplate() {
 function loadUsersTable() {
     const tbody = document.getElementById('usersTableBody');
     tbody.innerHTML = '';
-    
+
     Object.keys(users).forEach(email => {
         const user = users[email];
         if (user) {
@@ -1299,6 +2653,7 @@ function loadUsersTable() {
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${email}</td>
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.name}</td>
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.role}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.userNumber || 'N/A'}</td>
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     ${user.mustChangePassword ? '<span class="text-red-600">No</span>' : '<span class="text-green-600">Sì</span>'}
                 </td>
@@ -1342,6 +2697,10 @@ function addNewUser() {
                         <option value="admin">Amministratore</option>
                     </select>
                 </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Numero Utente</label>
+                    <input type="number" id="newUserNumber" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Numero utente (es. 1, 2, 3...)" min="1">
+                </div>
             </div>
             
             <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
@@ -1374,23 +2733,26 @@ async function saveNewUser() {
     const email = document.getElementById('newUserEmail').value;
     const name = document.getElementById('newUserName').value;
     const role = document.getElementById('newUserRole').value;
-    
+    const userNumber = document.getElementById('newUserNumber').value;
+
     if (users[email]) {
         showNotification('Utente con questa email già esistente!', 'error');
         return;
     }
-    
+
     // Hash the temporary password
     const hashedPassword = await hashPassword('123456');
-    
+
     users[email] = {
         email: email,
         password: hashedPassword,
         role: role,
         name: name,
-        mustChangePassword: true
+        mustChangePassword: true,
+        userNumber: parseInt(userNumber)
     };
-    
+
+    saveUsers();
     closeRateModal();
     loadUsersTable();
     showNotification(`Utente ${email} aggiunto con successo!`, 'success');
@@ -1404,6 +2766,7 @@ function deleteUser(email) {
     
     if (confirm(`Sei sicuro di voler eliminare l'utente ${email}?`)) {
         delete users[email];
+        saveUsers();
         loadUsersTable();
         showNotification(`Utente ${email} eliminato con successo!`, 'success');
     }
@@ -1414,6 +2777,7 @@ async function resetUserPassword(email) {
         const hashedPassword = await hashPassword('123456');
         users[email].password = hashedPassword;
         users[email].mustChangePassword = true;
+        saveUsers();
         loadUsersTable();
         showNotification(`Password di ${email} resettata con successo!`, 'success');
     }

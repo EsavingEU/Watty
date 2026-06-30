@@ -5,7 +5,7 @@
 }
 
 body {
-    background: linear-gradient(135deg, #0f172a 0%, #581c87 50%, #0f172a 100%);
+    background: linear-gradient(135deg, #0c4a6e 0%, #0d9488 50%, #0c4a6e 100%);
     min-height: 100vh;
 }
 
@@ -106,7 +106,7 @@ select:focus, input:focus {
     left: 0;
     right: 0;
     height: 2px;
-    background: linear-gradient(90deg, #3b82f6, #8b5cf6);
+    background: linear-gradient(90deg, #3b82f6, #14b8a6);
     border-radius: 2px;
 }
 
@@ -125,31 +125,72 @@ select:focus, input:focus {
         padding-left: 1rem;
         padding-right: 1rem;
     }
-    
+
     .grid {
         grid-template-columns: 1fr;
     }
-    
+
     .space-x-6 {
         flex-direction: column;
         space-y: 1rem;
     }
-    
+
     .text-xl {
         font-size: 1.125rem;
     }
-    
+
     .text-2xl {
         font-size: 1.25rem;
     }
-    
+
     .text-3xl {
         font-size: 1.5rem;
     }
-    
+
     .admin-tab-btn {
         padding: 0.5rem 1rem;
         font-size: 0.75rem;
+    }
+
+    /* Table responsive styles */
+    .overflow-x-auto {
+        -webkit-overflow-scrolling: touch;
+        scroll-behavior: smooth;
+    }
+
+    table {
+        font-size: 0.75rem;
+    }
+
+    th, td {
+        padding: 0.5rem 0.25rem !important;
+        white-space: nowrap;
+    }
+
+    /* Hide less important columns on mobile */
+    .hide-mobile {
+        display: none;
+    }
+
+    /* Hide admin-only columns for non-admin users */
+    .admin-only {
+        display: none;
+    }
+}
+
+@media (max-width: 480px) {
+    table {
+        font-size: 0.65rem;
+    }
+
+    th, td {
+        padding: 0.4rem 0.2rem !important;
+    }
+
+    /* Action buttons smaller on mobile */
+    button {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.7rem;
     }
 }
 
