@@ -3087,11 +3087,8 @@ async function saveNewUser() {
             return;
         }
 
-        // Create user in Firebase Auth with temporary password
-        const tempPassword = '123456';
-        const userCredential = await auth.createUserWithEmailAndPassword(email, tempPassword);
-
-        // Save user data to Firestore
+        // Save user data to Firestore only (not Firebase Auth)
+        // User will need to be created in Firebase Console separately
         await db.collection('users').doc(email).set({
             name: name,
             role: role,
@@ -3100,23 +3097,12 @@ async function saveNewUser() {
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
 
-        // Sign out after creation (we were signed in as the new user)
-        await auth.signOut();
-
         closeRateModal();
-        showNotification(`Utente ${email} aggiunto con successo! Password temporanea: 123456. La pagina verrà ricaricata.`, 'success');
-
-        // Reload page after 2 seconds
-        setTimeout(() => {
-            window.location.reload();
-        }, 2000);
+        loadUsersTable();
+        showNotification(`Utente ${email} aggiunto a Firestore! Vai su Firebase Console -> Authentication -> Users per creare l'utente con password 123456.`, 'success');
     } catch (error) {
         console.error('Error creating user:', error);
-        if (error.code === 'auth/email-already-in-use') {
-            showNotification('Utente con questa email già esistente in Firebase Auth!', 'error');
-        } else {
-            showNotification('Errore nella creazione utente: ' + error.message, 'error');
-        }
+        showNotification('Errore nella creazione utente: ' + error.message, 'error');
     }
 }
 
