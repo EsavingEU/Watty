@@ -3139,11 +3139,12 @@ async function deleteUser(email) {
             // Delete from Firestore
             await db.collection('users').doc(email).delete();
 
-            // Delete from Firebase Auth (requires Admin SDK, so we skip this for now)
-            // Users will need to be deleted manually from Firebase Console if needed
+            // Note: Firebase Auth requires Admin SDK to delete users from server-side
+            // For now, users need to be deleted manually from Firebase Console
+            // Go to: Firebase Console -> Authentication -> Users -> Click user -> Delete
 
             loadUsersTable();
-            showNotification(`Utente ${email} eliminato con successo!`, 'success');
+            showNotification(`Utente ${email} eliminato da Firestore! Per eliminare completamente l'utente, vai su Firebase Console -> Authentication -> Users e cancellalo manualmente.`, 'success');
         }
     } catch (error) {
         console.error('Error deleting user:', error);
@@ -3176,24 +3177,30 @@ async function resetUserPassword(email) {
 function showChangePasswordModal() {
     const modal = document.getElementById('rateModal');
     const content = document.getElementById('rateModalContent');
-    
+    const modalTitle = modal.querySelector('h3');
+
+    // Update modal title
+    if (modalTitle) {
+        modalTitle.textContent = 'Modifica Password Iniziale';
+    }
+
     content.innerHTML = `
         <form id="changePasswordForm" class="space-y-4">
             <div class="mb-4">
                 <h4 class="text-lg font-semibold text-gray-800">Cambia Password</h4>
                 <p class="text-sm text-gray-600 mt-2">Devi cambiare la password al primo accesso.</p>
             </div>
-            
+
             <div>
                 <label class="block text-sm font-medium text-gray-700">Nuova Password</label>
                 <input type="password" id="newPassword" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Nuova password">
             </div>
-            
+
             <div>
                 <label class="block text-sm font-medium text-gray-700">Conferma Password</label>
                 <input type="password" id="confirmPassword" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Conferma password">
             </div>
-            
+
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p class="text-sm text-blue-800 font-semibold mb-2">Requisiti password:</p>
                 <ul class="text-sm text-blue-700 list-disc list-inside">
@@ -3203,7 +3210,7 @@ function showChangePasswordModal() {
                     <li>Almeno un numero</li>
                 </ul>
             </div>
-            
+
             <div class="flex justify-end space-x-4 pt-4 border-t">
                 <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
                     <i class="fas fa-save mr-2"></i> Cambia Password
@@ -3211,9 +3218,9 @@ function showChangePasswordModal() {
             </div>
         </form>
     `;
-    
+
     modal.classList.remove('hidden');
-    
+
     document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
         e.preventDefault();
         changePassword();
