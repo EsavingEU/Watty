@@ -25,46 +25,9 @@ async function loadAllData() {
     await loadRules();
     await loadCarriers();
     await loadClients();
-    await checkIfAdminExists(); // Check if admin exists to show/hide setup button
     loadUsers(); // Keep users from localStorage for now (will migrate)
     await loadShipments();
     cleanupOldDDTFiles();
-}
-
-// Check if admin user exists in Firestore
-async function checkIfAdminExists() {
-    const setupBtn = document.getElementById('setupAdminBtn');
-    if (!setupBtn) return;
-
-    // Check localStorage flag first
-    const adminCreated = localStorage.getItem('adminCreated');
-
-    if (adminCreated === 'true') {
-        // Admin already created, hide setup button
-        setupBtn.classList.add('hidden');
-        return;
-    }
-
-    try {
-        const snapshot = await db.collection('users').limit(1).get();
-
-        if (snapshot.empty) {
-            // No users exist, show setup button
-            setupBtn.classList.remove('hidden');
-        } else {
-            // Users exist, hide setup button and save flag
-            setupBtn.classList.add('hidden');
-            localStorage.setItem('adminCreated', 'true');
-        }
-    } catch (error) {
-        console.error('Error checking if admin exists:', error);
-        // On error, check localStorage flag
-        if (adminCreated === 'true') {
-            setupBtn.classList.add('hidden');
-        } else {
-            setupBtn.classList.remove('hidden');
-        }
-    }
 }
 
 // Password hashing utility using Web Crypto API
@@ -1685,116 +1648,44 @@ async function createInitialAdmin(email, password, name) {
     }
 }
 
-// Show setup admin modal
-function showSetupAdminModal() {
-    const modal = document.getElementById('rateModal');
-    const content = document.getElementById('rateModalContent');
-
-    content.innerHTML = `
-        <div class="space-y-4">
-            <h3 class="text-xl font-bold text-gray-800">Setup Iniziale Admin</h3>
-            <p class="text-sm text-gray-600">Crea l'utente amministratore iniziale per Firebase.</p>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Email</label>
-                <input type="email" id="setupEmail" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500" placeholder="logistica@esaving.eu">
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Password</label>
-                <input type="password" id="setupPassword" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500" placeholder="123456">
-            </div>
-
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-2">Nome</label>
-                <input type="text" id="setupName" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500" placeholder="Amministratore">
-            </div>
-
-            <div class="flex gap-4">
-                <button onclick="handleSetupAdmin()" class="flex-1 bg-gradient-to-r from-green-500 to-teal-500 text-white py-3 rounded-lg hover:from-green-600 hover:to-teal-600 transition font-semibold">
-                    <i class="fas fa-check mr-2"></i> Crea Admin
-                </button>
-                <button onclick="closeRateModal()" class="flex-1 bg-gray-300 text-gray-700 py-3 rounded-lg hover:bg-gray-400 transition font-semibold">
-                    <i class="fas fa-times mr-2"></i> Annulla
-                </button>
-            </div>
-        </div>
-    `;
-
-    modal.classList.remove('hidden');
-}
-
-// Handle setup admin
-async function handleSetupAdmin() {
-    const email = document.getElementById('setupEmail').value;
-    const password = document.getElementById('setupPassword').value;
-    const name = document.getElementById('setupName').value;
-
-    if (!email || !password || !name) {
-        showNotification('Compila tutti i campi', 'error');
-        return;
-    }
-
-    try {
-        showNotification('Creazione utente admin in corso...', 'info');
-
-        // Create user in Firebase Auth
-        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
-
-        // Save additional user data to Firestore
-        await db.collection('users').doc(email).set({
-            name: name,
-            role: 'admin',
-            mustChangePassword: true,
-            userNumber: 0,
-            createdAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
-
-        // Sign out after creation
-        await auth.signOut();
-
-        // Save flag to localStorage
-        localStorage.setItem('adminCreated', 'true');
-
-        // Hide setup button immediately
-        const setupBtn = document.getElementById('setupAdminBtn');
-        if (setupBtn) setupBtn.classList.add('hidden');
-
-        closeRateModal();
-        showNotification('Utente admin creato con successo! Ora puoi fare login.', 'success');
-
-        // Pre-fill login form
-        document.getElementById('email').value = email;
-        document.getElementById('password').value = password;
-    } catch (error) {
-        console.error('Error creating admin user:', error);
-        if (error.code === 'auth/email-already-in-use') {
-            showNotification('Utente già esistente. Fai login con le credenziali esistenti.', 'error');
-            // Hide setup button if user already exists
-            localStorage.setItem('adminCreated', 'true');
-            const setupBtn = document.getElementById('setupAdminBtn');
-            if (setupBtn) setupBtn.classList.add('hidden');
-        } else {
-            showNotification('Errore nella creazione: ' + error.message, 'error');
-        }
-    }
-}
-
 function populateProvinces() {
     const select = document.getElementById('provincia');
-    select.innerHTML = '<option value="">Seleziona provincia</option>';
-    
+    select.innerHTML = '<option value="" style="color: #1f2937;">Seleziona provincia</option>';
+
     Object.keys(tariffeProvinciali).sort().forEach(provincia => {
         const dati = tariffeProvinciali[provincia];
         if (dati) {
             const option = document.createElement('option');
             option.value = provincia;
+            option.style.color = '#1f2937';
             // Usa il campo sigla se disponibile, altrimenti usa la chiave
             const sigla = dati.sigla || provincia;
             option.textContent = `${dati.nome} - ${sigla}`;
             select.appendChild(option);
         }
     });
+}
+
+// Toggle option buttons
+function toggleOption(field, value) {
+    // Update hidden input
+    document.getElementById(field).value = value;
+
+    // Update button styles
+    const buttons = document.querySelectorAll(`[id^="${field}-"]`);
+    buttons.forEach(btn => {
+        btn.classList.remove('selected');
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+
+    // Highlight selected button
+    const selectedBtn = document.getElementById(`${field}-${value}`);
+    if (selectedBtn) {
+        selectedBtn.classList.add('selected');
+        selectedBtn.style.background = 'linear-gradient(to right, #0ea5e9, #14b8a6)';
+        selectedBtn.style.borderColor = '#14b8a6';
+    }
 }
 
 function calculateCost() {

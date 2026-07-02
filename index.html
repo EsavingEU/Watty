@@ -93,8 +93,8 @@
                                     <label class="block text-sm font-medium text-white/80 mb-2">
                                         <i class="fas fa-map-marker-alt mr-2 text-teal-400"></i> Provincia
                                     </label>
-                                    <select id="provincia" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:ring-2 focus:ring-teal-500 focus:border-transparent focus:bg-white/20 transition">
-                                        <option value="" class="text-gray-900">Seleziona provincia</option>
+                                    <select id="provincia" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:ring-2 focus:ring-teal-500 focus:border-transparent focus:bg-white/20 transition" style="color: white;">
+                                        <option value="" style="color: #1f2937;">Seleziona provincia</option>
                                         <!-- Province will be populated dynamically from admin panel -->
                                     </select>
                                 </div>
@@ -112,10 +112,15 @@
                                     <label class="block text-sm font-medium text-white/80 mb-2">
                                         <i class="fas fa-truck-loading mr-2 text-teal-400"></i> Sponda Idraulica
                                     </label>
-                                    <select id="sponda" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:ring-2 focus:ring-teal-500 focus:border-transparent focus:bg-white/20 transition">
-                                        <option value="no" class="text-gray-900">No</option>
-                                        <option value="si" class="text-gray-900">Sì</option>
-                                    </select>
+                                    <div class="flex gap-2">
+                                        <button type="button" onclick="toggleOption('sponda', 'no')" id="sponda-no" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn selected">
+                                            No
+                                        </button>
+                                        <button type="button" onclick="toggleOption('sponda', 'si')" id="sponda-si" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn">
+                                            Sì
+                                        </button>
+                                    </div>
+                                    <input type="hidden" id="sponda" value="no">
                                 </div>
 
                                 <!-- Batteria -->
@@ -123,10 +128,15 @@
                                     <label class="block text-sm font-medium text-white/80 mb-2">
                                         <i class="fas fa-battery-full mr-2 text-teal-400"></i> Batteria
                                     </label>
-                                    <select id="batteria" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:ring-2 focus:ring-teal-500 focus:border-transparent focus:bg-white/20 transition">
-                                        <option value="no" class="text-gray-900">No</option>
-                                        <option value="si" class="text-gray-900">Sì</option>
-                                    </select>
+                                    <div class="flex gap-2">
+                                        <button type="button" onclick="toggleOption('batteria', 'no')" id="batteria-no" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn selected">
+                                            No
+                                        </button>
+                                        <button type="button" onclick="toggleOption('batteria', 'si')" id="batteria-si" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn">
+                                            Sì
+                                        </button>
+                                    </div>
+                                    <input type="hidden" id="batteria" value="no">
                                 </div>
 
                                 <!-- Fascio -->
@@ -134,12 +144,21 @@
                                     <label class="block text-sm font-medium text-white/80 mb-2">
                                         <i class="fas fa-box mr-2 text-teal-400"></i> Fascio
                                     </label>
-                                    <select id="fascio" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:ring-2 focus:ring-teal-500 focus:border-transparent focus:bg-white/20 transition">
-                                        <option value="no" class="text-gray-900">No</option>
-                                        <option value="3-4" class="text-gray-900">Tra 3 e 4 metri</option>
-                                        <option value="4-5" class="text-gray-900">Tra 4 e 5 metri</option>
-                                        <option value="oltre5" class="text-gray-900">Oltre 5 metri</option>
-                                    </select>
+                                    <div class="flex gap-2">
+                                        <button type="button" onclick="toggleOption('fascio', 'no')" id="fascio-no" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn selected">
+                                            No
+                                        </button>
+                                        <button type="button" onclick="toggleOption('fascio', '3-4')" id="fascio-3-4" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn">
+                                            3-4m
+                                        </button>
+                                        <button type="button" onclick="toggleOption('fascio', '4-5')" id="fascio-4-5" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn">
+                                            4-5m
+                                        </button>
+                                        <button type="button" onclick="toggleOption('fascio', 'oltre5')" id="fascio-oltre5" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn">
+                                            >5m
+                                        </button>
+                                    </div>
+                                    <input type="hidden" id="fascio" value="no">
                                 </div>
 
                                 <!-- Pallet Moduli Sfusi -->
@@ -147,10 +166,15 @@
                                     <label class="block text-sm font-medium text-white/80 mb-2">
                                         <i class="fas fa-pallet mr-2 text-teal-400"></i> Pallet Moduli Sfusi
                                     </label>
-                                    <select id="palletSfuso" class="w-full px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white placeholder-white/50 focus:ring-2 focus:ring-teal-500 focus:border-transparent focus:bg-white/20 transition">
-                                        <option value="no" class="text-gray-900">No</option>
-                                        <option value="si" class="text-gray-900">Sì</option>
-                                    </select>
+                                    <div class="flex gap-2">
+                                        <button type="button" onclick="toggleOption('palletSfuso', 'no')" id="palletSfuso-no" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn selected">
+                                            No
+                                        </button>
+                                        <button type="button" onclick="toggleOption('palletSfuso', 'si')" id="palletSfuso-si" class="flex-1 px-4 py-3 bg-white/10 border border-white/20 rounded-xl text-white transition hover:bg-white/20 option-btn">
+                                            Sì
+                                        </button>
+                                    </div>
+                                    <input type="hidden" id="palletSfuso" value="no">
                                 </div>
 
                                 <!-- Numero Righe d'Ordine -->
@@ -739,12 +763,6 @@
                         <i class="fas fa-sign-in-alt mr-2"></i> Accedi
                     </button>
                 </form>
-
-                <div class="mt-4 text-center">
-                    <button id="setupAdminBtn" onclick="showSetupAdminModal()" class="text-sm text-teal-600 hover:text-teal-800 underline hidden">
-                        Setup Iniziale Admin
-                    </button>
-                </div>
 
                 <div class="mt-6 text-center text-sm text-gray-600">
                     <p>Password primo accesso: 123456</p>
