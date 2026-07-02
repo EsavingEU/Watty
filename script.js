@@ -1359,10 +1359,10 @@ const defaultRegoleCalcolo = {
 };
 
 // Initialize application
-document.addEventListener('DOMContentLoaded', function() {
-    loadAllData();
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadAllData();
     populateProvinces();
-    
+
     // Check if user is already logged in
     const loggedInUser = localStorage.getItem('loggedInUser');
     if (loggedInUser) {
