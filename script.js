@@ -3103,20 +3103,13 @@ async function saveNewUser() {
         // Sign out after creation (we were signed in as the new user)
         await auth.signOut();
 
-        // Sign back in as the current admin user
-        if (currentUser) {
-            // We need to re-authenticate with the current user's credentials
-            // For now, we'll just reload the page to force re-login
-            showNotification(`Utente ${email} aggiunto con successo! Effettua nuovamente il login.`, 'success');
-            closeRateModal();
-            setTimeout(() => {
-                window.location.reload();
-            }, 2000);
-        } else {
-            closeRateModal();
-            loadUsersTable();
-            showNotification(`Utente ${email} aggiunto con successo!`, 'success');
-        }
+        closeRateModal();
+        showNotification(`Utente ${email} aggiunto con successo! Password temporanea: 123456. La pagina verrà ricaricata.`, 'success');
+
+        // Reload page after 2 seconds
+        setTimeout(() => {
+            window.location.reload();
+        }, 2000);
     } catch (error) {
         console.error('Error creating user:', error);
         if (error.code === 'auth/email-already-in-use') {
