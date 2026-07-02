@@ -33,22 +33,37 @@ async function loadAllData() {
 
 // Check if admin user exists in Firestore
 async function checkIfAdminExists() {
+    const setupBtn = document.getElementById('setupAdminBtn');
+    if (!setupBtn) return;
+
+    // Check localStorage flag first
+    const adminCreated = localStorage.getItem('adminCreated');
+
+    if (adminCreated === 'true') {
+        // Admin already created, hide setup button
+        setupBtn.classList.add('hidden');
+        return;
+    }
+
     try {
         const snapshot = await db.collection('users').limit(1).get();
-        const setupBtn = document.getElementById('setupAdminBtn');
 
         if (snapshot.empty) {
             // No users exist, show setup button
-            if (setupBtn) setupBtn.classList.remove('hidden');
+            setupBtn.classList.remove('hidden');
         } else {
-            // Users exist, hide setup button
-            if (setupBtn) setupBtn.classList.add('hidden');
+            // Users exist, hide setup button and save flag
+            setupBtn.classList.add('hidden');
+            localStorage.setItem('adminCreated', 'true');
         }
     } catch (error) {
         console.error('Error checking if admin exists:', error);
-        // On error, show setup button to allow manual setup
-        const setupBtn = document.getElementById('setupAdminBtn');
-        if (setupBtn) setupBtn.classList.remove('hidden');
+        // On error, check localStorage flag
+        if (adminCreated === 'true') {
+            setupBtn.classList.add('hidden');
+        } else {
+            setupBtn.classList.remove('hidden');
+        }
     }
 }
 
@@ -1738,6 +1753,13 @@ async function handleSetupAdmin() {
         // Sign out after creation
         await auth.signOut();
 
+        // Save flag to localStorage
+        localStorage.setItem('adminCreated', 'true');
+
+        // Hide setup button immediately
+        const setupBtn = document.getElementById('setupAdminBtn');
+        if (setupBtn) setupBtn.classList.add('hidden');
+
         closeRateModal();
         showNotification('Utente admin creato con successo! Ora puoi fare login.', 'success');
 
@@ -1748,6 +1770,10 @@ async function handleSetupAdmin() {
         console.error('Error creating admin user:', error);
         if (error.code === 'auth/email-already-in-use') {
             showNotification('Utente già esistente. Fai login con le credenziali esistenti.', 'error');
+            // Hide setup button if user already exists
+            localStorage.setItem('adminCreated', 'true');
+            const setupBtn = document.getElementById('setupAdminBtn');
+            if (setupBtn) setupBtn.classList.add('hidden');
         } else {
             showNotification('Errore nella creazione: ' + error.message, 'error');
         }
