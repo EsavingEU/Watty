@@ -1362,6 +1362,7 @@ const defaultRegoleCalcolo = {
 document.addEventListener('DOMContentLoaded', async function() {
     await loadAllData();
     populateProvinces();
+    initProvinceAutocomplete();
 
     // Check if user is already logged in
     const loggedInUser = localStorage.getItem('loggedInUser');
@@ -1649,21 +1650,94 @@ async function createInitialAdmin(email, password, name) {
 }
 
 function populateProvinces() {
-    const select = document.getElementById('provincia');
-    select.innerHTML = '<option value="" style="color: #1f2937;">Seleziona provincia</option>';
+    // No longer needed for select, but keep for compatibility
+    // Province autocomplete is now handled by input field
+}
 
-    Object.keys(tariffeProvinciali).sort().forEach(provincia => {
-        const dati = tariffeProvinciali[provincia];
-        if (dati) {
-            const option = document.createElement('option');
-            option.value = provincia;
-            option.style.color = '#1f2937';
-            // Usa il campo sigla se disponibile, altrimenti usa la chiave
-            const sigla = dati.sigla || provincia;
-            option.textContent = `${dati.nome} - ${sigla}`;
-            select.appendChild(option);
+// Province autocomplete functionality
+let selectedProvincia = '';
+
+function initProvinceAutocomplete() {
+    const input = document.getElementById('provincia');
+    const suggestions = document.getElementById('provinciaSuggestions');
+
+    if (!input || !suggestions) return;
+
+    // Show suggestions on input
+    input.addEventListener('input', function() {
+        const value = this.value.toLowerCase();
+        if (value.length < 1) {
+            suggestions.classList.add('hidden');
+            return;
+        }
+
+        const matches = [];
+        Object.keys(tariffeProvinciali).forEach(provincia => {
+            const dati = tariffeProvinciali[provincia];
+            if (dati) {
+                const sigla = dati.sigla || '';
+                const nome = dati.nome || provincia;
+                const searchTerms = `${nome} ${sigla} ${provincia}`.toLowerCase();
+
+                if (searchTerms.includes(value)) {
+                    matches.push({
+                        key: provincia,
+                        nome: nome,
+                        sigla: sigla
+                    });
+                }
+            }
+        });
+
+        // Sort by relevance (exact match first)
+        matches.sort((a, b) => {
+            const aExact = a.sigla.toLowerCase() === value || a.nome.toLowerCase() === value;
+            const bExact = b.sigla.toLowerCase() === value || b.nome.toLowerCase() === value;
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+            return a.nome.localeCompare(b.nome);
+        });
+
+        // Show max 8 suggestions
+        const limitedMatches = matches.slice(0, 8);
+
+        if (limitedMatches.length === 0) {
+            suggestions.classList.add('hidden');
+            return;
+        }
+
+        suggestions.innerHTML = limitedMatches.map(match => `
+            <div class="px-4 py-3 hover:bg-gray-100 cursor-pointer transition" onclick="selectProvincia('${match.key}', '${match.nome} - ${match.sigla}')">
+                <div class="text-sm font-medium text-gray-900">${match.nome}</div>
+                <div class="text-xs text-gray-500">${match.sigla}</div>
+            </div>
+        `).join('');
+
+        suggestions.classList.remove('hidden');
+    });
+
+    // Hide suggestions on click outside
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !suggestions.contains(e.target)) {
+            suggestions.classList.add('hidden');
         }
     });
+
+    // Hide suggestions on escape key
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            suggestions.classList.add('hidden');
+        }
+    });
+}
+
+function selectProvincia(key, displayValue) {
+    const input = document.getElementById('provincia');
+    const suggestions = document.getElementById('provinciaSuggestions');
+
+    input.value = displayValue;
+    selectedProvincia = key;
+    suggestions.classList.add('hidden');
 }
 
 // Toggle option buttons
@@ -1689,14 +1763,14 @@ function toggleOption(field, value) {
 }
 
 function calculateCost() {
-    const provincia = document.getElementById('provincia').value;
+    const provincia = selectedProvincia;
     const peso = parseFloat(document.getElementById('peso').value);
     const sponda = document.getElementById('sponda').value;
     const batteria = document.getElementById('batteria').value;
     const fascio = document.getElementById('fascio').value;
     const palletSfuso = document.getElementById('palletSfuso').value;
     const numeroRighe = parseInt(document.getElementById('numeroRighe').value) || 0;
-    
+
     if (!provincia || !peso) {
         showNotification('Per favore compila tutti i campi obbligatori', 'error');
         return;
@@ -1989,6 +2063,7 @@ function displayCalculationResult(result) {
 function resetCalculator() {
     // Resetta tutti i campi del form
     document.getElementById('provincia').value = '';
+    selectedProvincia = '';
     document.getElementById('peso').value = '';
     
     // Resetta i risultati
@@ -3404,9 +3479,15 @@ function loadCalculation(id) {
     }
     
     const data = calculation.data;
-    
+
     // Load parameters into form
-    document.getElementById('provincia').value = data.provincia;
+    selectedProvincia = data.provincia;
+    const provinciaData = tariffeProvinciali[data.provincia];
+    if (provinciaData) {
+        document.getElementById('provincia').value = `${provinciaData.nome} - ${provinciaData.sigla}`;
+    } else {
+        document.getElementById('provincia').value = data.provincia;
+    }
     document.getElementById('peso').value = data.peso;
     document.getElementById('sponda').value = data.sponda;
     document.getElementById('batteria').value = data.batteria;
