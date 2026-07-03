@@ -1667,11 +1667,18 @@ function initProvinceAutocomplete() {
     const input = document.getElementById('provincia');
     const suggestions = document.getElementById('provinciaSuggestions');
 
-    if (!input || !suggestions) return;
+    if (!input || !suggestions) {
+        console.error('Province autocomplete elements not found');
+        return;
+    }
+
+    console.log('Initializing province autocomplete, total provinces:', Object.keys(tariffeProvinciali).length);
 
     // Show suggestions on input
     input.addEventListener('input', function() {
         const value = this.value.toLowerCase();
+        console.log('Input value:', value, 'length:', value.length);
+
         if (value.length < 1) {
             suggestions.classList.add('hidden');
             return;
@@ -1694,6 +1701,8 @@ function initProvinceAutocomplete() {
                 }
             }
         });
+
+        console.log('Found matches:', matches.length);
 
         // Sort by relevance (exact match first)
         matches.sort((a, b) => {
@@ -1720,6 +1729,7 @@ function initProvinceAutocomplete() {
         `).join('');
 
         suggestions.classList.remove('hidden');
+        console.log('Suggestions shown:', limitedMatches.length);
     });
 
     // Hide suggestions on click outside
