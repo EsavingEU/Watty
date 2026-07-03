@@ -1361,8 +1361,14 @@ const defaultRegoleCalcolo = {
 // Initialize application
 document.addEventListener('DOMContentLoaded', async function() {
     await loadAllData();
+    console.log('Data loaded, province count:', Object.keys(tariffeProvinciali).length);
     populateProvinces();
-    initProvinceAutocomplete();
+
+    // Wait a bit to ensure DOM is ready
+    setTimeout(() => {
+        initProvinceAutocomplete();
+        console.log('Province autocomplete initialized');
+    }, 100);
 
     // Check if user is already logged in
     const loggedInUser = localStorage.getItem('loggedInUser');
@@ -2128,7 +2134,9 @@ async function loadRates() {
             snapshot.forEach(doc => {
                 tariffeProvinciali[doc.id] = doc.data();
             });
-            console.log('Rates loaded from Firestore');
+            console.log('Rates loaded from Firestore, count:', Object.keys(tariffeProvinciali).length);
+            // Reinitialize autocomplete after data is loaded
+            setTimeout(() => initProvinceAutocomplete(), 100);
         } else {
             // Fallback to localStorage if Firestore is empty
             const savedRates = localStorage.getItem('tariffeProvinciali');
@@ -2140,7 +2148,8 @@ async function loadRates() {
                         tariffeProvinciali[provincia].sigla = '';
                     }
                 });
-                console.log('Rates loaded from localStorage (fallback)');
+                console.log('Rates loaded from localStorage (fallback), count:', Object.keys(tariffeProvinciali).length);
+                setTimeout(() => initProvinceAutocomplete(), 100);
             } else {
                 tariffeProvinciali = {...defaultTariffeProvinciali};
                 await saveRates();
@@ -2157,7 +2166,8 @@ async function loadRates() {
                     tariffeProvinciali[provincia].sigla = '';
                 }
             });
-            console.log('Rates loaded from localStorage (error fallback)');
+            console.log('Rates loaded from localStorage (error fallback), count:', Object.keys(tariffeProvinciali).length);
+            setTimeout(() => initProvinceAutocomplete(), 100);
         } else {
             tariffeProvinciali = {...defaultTariffeProvinciali};
             saveRates();
