@@ -2135,6 +2135,7 @@ async function loadRates() {
                 tariffeProvinciali[doc.id] = doc.data();
             });
             console.log('Rates loaded from Firestore, count:', Object.keys(tariffeProvinciali).length);
+            console.log('Sample province:', Object.keys(tariffeProvinciali)[0], tariffeProvinciali[Object.keys(tariffeProvinciali)[0]]);
             // Reinitialize autocomplete after data is loaded
             setTimeout(() => initProvinceAutocomplete(), 100);
         } else {
@@ -2149,9 +2150,11 @@ async function loadRates() {
                     }
                 });
                 console.log('Rates loaded from localStorage (fallback), count:', Object.keys(tariffeProvinciali).length);
+                console.log('Sample province:', Object.keys(tariffeProvinciali)[0], tariffeProvinciali[Object.keys(tariffeProvinciali)[0]]);
                 setTimeout(() => initProvinceAutocomplete(), 100);
             } else {
                 tariffeProvinciali = {...defaultTariffeProvinciali};
+                console.log('Rates loaded from default, count:', Object.keys(tariffeProvinciali).length);
                 await saveRates();
             }
         }
@@ -2170,6 +2173,7 @@ async function loadRates() {
             setTimeout(() => initProvinceAutocomplete(), 100);
         } else {
             tariffeProvinciali = {...defaultTariffeProvinciali};
+            console.log('Rates loaded from default (error), count:', Object.keys(tariffeProvinciali).length);
             saveRates();
         }
     }
