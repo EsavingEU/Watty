@@ -148,6 +148,11 @@ function loadAllShipments() {
             row.classList.add('stuck-shipment');
         }
         
+        // Add green highlighting for delivered shipments
+        if (shipment.stato === 'Consegnato') {
+            row.classList.add('delivered-shipment');
+        }
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
@@ -219,6 +224,11 @@ function loadUserShipments() {
             row.classList.add('stuck-shipment');
         }
         
+        // Add green highlighting for delivered shipments
+        if (shipment.stato === 'Consegnato') {
+            row.classList.add('delivered-shipment');
+        }
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
@@ -261,13 +271,13 @@ function isShipmentStuckTooLong(shipment) {
         return false;
     }
 
-    // Check if it's been stuck for more than 3 days
+    // Check if it's been stuck for more than 1 day
     const preparationDate = new Date(shipment.dataPreparazioneMerce);
     const today = new Date();
     const diffTime = Math.abs(today - preparationDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    return diffDays > 3;
+    return diffDays > 1;
 }
 
 function loadDeliveredShipments() {

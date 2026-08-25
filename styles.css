@@ -312,3 +312,13 @@ select:focus, input:focus {
 .stuck-shipment:hover {
     background-color: #fde047 !important; /* Yellow-300 */
 }
+
+/* Delivered shipment highlighting for tracking table */
+.delivered-shipment {
+    background-color: #bbf7d0 !important; /* Green-200 */
+    border-left: 4px solid #22c55e !important; /* Green-500 */
+}
+
+.delivered-shipment:hover {
+    background-color: #86efac !important; /* Green-300 */
+}
