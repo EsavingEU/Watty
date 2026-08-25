@@ -302,3 +302,13 @@ select:focus, input:focus {
     background: rgba(255, 255, 255, 0.15);
     transform: translateY(-2px);
 }
+
+/* Stuck shipment highlighting */
+.stuck-shipment {
+    background-color: #fef08a !important; /* Yellow-200 */
+    border-left: 4px solid #eab308 !important; /* Yellow-500 */
+}
+
+.stuck-shipment:hover {
+    background-color: #fde047 !important; /* Yellow-300 */
+}

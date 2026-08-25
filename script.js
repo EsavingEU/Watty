@@ -142,6 +142,12 @@ function loadAllShipments() {
         const shipment = spedizioni[id];
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        
+        // Add yellow highlighting for stuck shipments
+        if (isShipmentStuckTooLong(shipment)) {
+            row.classList.add('stuck-shipment');
+        }
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
@@ -207,6 +213,12 @@ function loadUserShipments() {
         const shipment = spedizioni[id];
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        
+        // Add yellow highlighting for stuck shipments
+        if (isShipmentStuckTooLong(shipment)) {
+            row.classList.add('stuck-shipment');
+        }
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
@@ -241,6 +253,21 @@ function isDeliveredMoreThan10Days(shipment) {
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     return diffDays > 10;
+}
+
+function isShipmentStuckTooLong(shipment) {
+    // Check if shipment is in "Preparato" or "In magazzino" state
+    if (shipment.stato !== 'Preparato' && shipment.stato !== 'In magazzino') {
+        return false;
+    }
+
+    // Check if it's been stuck for more than 3 days
+    const preparationDate = new Date(shipment.dataPreparazioneMerce);
+    const today = new Date();
+    const diffTime = Math.abs(today - preparationDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return diffDays > 3;
 }
 
 function loadDeliveredShipments() {
@@ -784,6 +811,12 @@ function editShipment(id) {
                     <label class="block text-sm font-medium text-gray-700">Note</label>
                     <textarea id="editShipmentNote" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" rows="3" style="text-transform: uppercase;">${shipment.note || ''}</textarea>
                 </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">File DDT (PDF)</label>
+                    <input type="file" id="editShipmentDDTFile" accept=".pdf" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <p class="text-xs text-gray-500 mt-1">Carica il file PDF del DDT (opzionale). Lascia vuoto per mantenere il file esistente.</p>
+                    ${shipment.ddtFile ? '<p class="text-xs text-green-600 mt-1">File DDT attuale presente</p>' : ''}
+                </div>
             </div>
 
             <div class="flex justify-end space-x-4 pt-4 border-t">
@@ -805,7 +838,14 @@ function editShipment(id) {
     });
 }
 
-function saveShipmentEdit(id) {
+async function saveShipmentEdit(id) {
+    const ddtFile = document.getElementById('editShipmentDDTFile').files[0];
+    let ddtBase64 = spedizioni[id].ddtFile || ''; // Keep existing file if no new file selected
+    
+    if (ddtFile) {
+        ddtBase64 = await readFileAsBase64(ddtFile);
+    }
+    
     spedizioni[id] = {
         id: id,
         nrDDT: spedizioni[id].nrDDT,
@@ -816,7 +856,8 @@ function saveShipmentEdit(id) {
         ultimoMagazzino: document.getElementById('editShipmentMagazzino').value,
         dataConsegna: document.getElementById('editShipmentDataConsegna').value,
         linkTracking: document.getElementById('editShipmentLinkTracking').value,
-        note: document.getElementById('editShipmentNote').value
+        note: document.getElementById('editShipmentNote').value,
+        ddtFile: ddtBase64
     };
 
     saveShipments();
@@ -825,7 +866,7 @@ function saveShipmentEdit(id) {
     showNotification('Spedizione modificata con successo!', 'success');
 }
 
-function deleteShipment(id) {
+async function deleteShipment(id) {
     const shipment = spedizioni[id];
     if (!shipment) return;
 
@@ -838,10 +879,23 @@ function deleteShipment(id) {
     }
 
     if (confirm(`Sei sicuro di voler eliminare la spedizione ${id}?`)) {
-        delete spedizioni[id];
-        saveShipments();
-        loadAllShipments();
-        showNotification('Spedizione eliminata con successo!', 'success');
+        try {
+            // Delete from Firestore
+            await db.collection('shipments').doc(id).delete();
+            console.log('Shipment deleted from Firestore:', id);
+            
+            // Delete from local object
+            delete spedizioni[id];
+            
+            // Save to localStorage as backup
+            localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+            
+            loadAllShipments();
+            showNotification('Spedizione eliminata con successo!', 'success');
+        } catch (error) {
+            console.error('Error deleting shipment from Firestore:', error);
+            showNotification('Errore durante l\'eliminazione della spedizione', 'error');
+        }
     }
 }
 
@@ -2170,6 +2224,7 @@ async function loadRates() {
         }
     } catch (error) {
         console.error('Error loading rates from Firestore:', error);
+        console.error('Error code:', error.code);
         // Fallback to localStorage on error
         const savedRates = localStorage.getItem('tariffeProvinciali');
         if (savedRates) {
