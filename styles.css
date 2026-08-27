@@ -322,3 +322,19 @@ select:focus, input:focus {
 .delivered-shipment:hover {
     background-color: #86efac !important; /* Green-300 */
 }
+
+/* Clicked shipment highlighting for admin */
+.clicked-shipment {
+    background-color: #bfdbfe !important; /* Blue-200 */
+    border-left: 4px solid #3b82f6 !important; /* Blue-500 */
+    box-shadow: 0 0 8px rgba(59, 130, 246, 0.5) !important;
+}
+
+.clicked-shipment:hover {
+    background-color: #93c5fd !important; /* Blue-300 */
+}
+
+/* Hide client code column for admin */
+.admin-hide-client-code {
+    display: none !important;
+}

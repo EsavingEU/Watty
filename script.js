@@ -88,6 +88,13 @@ let spedizioni = {
 };
 
 // Tracking Section Functions
+// Global variable to track clicked shipment
+let clickedShipmentId = null;
+
+function markClickedShipment(id) {
+    clickedShipmentId = id;
+}
+
 function loadTrackingSection() {
     if (!currentUser) {
         showNotification('Devi effettuare il login per accedere al tracking', 'error');
@@ -153,9 +160,14 @@ function loadAllShipments() {
             row.classList.add('delivered-shipment');
         }
         
+        // Add blue highlighting for clicked shipment (admin only)
+        if (clickedShipmentId === shipment.id) {
+            row.classList.add('clicked-shipment');
+        }
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-hide-client-code">${shipment.codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
@@ -164,7 +176,7 @@ function loadAllShipments() {
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 ${shipment.linkTracking ? `
-                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <a href="${shipment.linkTracking}" target="_blank" onclick="markClickedShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
                 ` : '-'}
             </td>
@@ -194,6 +206,16 @@ function loadUserShipments() {
         const shipment = spedizioni[id];
         const clientUserNumber = clienti[shipment.codiceCliente];
         const isDeliveredOld = isDeliveredMoreThan10Days(shipment);
+        
+        // Log for debugging user shipment visibility
+        console.log('Filtering shipment:', shipment.nrDDT, 'Client:', shipment.codiceCliente, 'ClientUserNumber:', clientUserNumber, 'CurrentUserNumber:', userNumber, 'IsDeliveredOld:', isDeliveredOld);
+        
+        // Check if client exists and matches user number
+        if (!clientUserNumber) {
+            console.log('Skipping shipment - client not found in clienti map:', shipment.codiceCliente);
+            return false;
+        }
+        
         return clientUserNumber === userNumber && !isDeliveredOld;
     });
 
@@ -271,13 +293,20 @@ function isShipmentStuckTooLong(shipment) {
         return false;
     }
 
-    // Check if it's been stuck for more than 1 day
+    // Check if state and warehouse haven't changed (using tracking history if available)
+    // For now, check if it's been stuck for more than 1 day
     const preparationDate = new Date(shipment.dataPreparazioneMerce);
     const today = new Date();
     const diffTime = Math.abs(today - preparationDate);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-    return diffDays > 1;
+    // Check if state and warehouse are the same (no recent updates)
+    // If there's a lastUpdateDate, use that instead of preparation date
+    const checkDate = shipment.lastUpdateDate ? new Date(shipment.lastUpdateDate) : preparationDate;
+    const diffTimeCheck = Math.abs(today - checkDate);
+    const diffDaysCheck = Math.ceil(diffTimeCheck / (1000 * 60 * 60 * 24));
+
+    return diffDaysCheck > 1;
 }
 
 function loadDeliveredShipments() {
@@ -679,6 +708,10 @@ function addNewShipment() {
                         <option value="Consegnato">Consegnato</option>
                     </select>
                 </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Consegna</label>
+                    <input type="date" id="newShipmentDataConsegna" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
                 <div class="md:col-span-2">
                     <label class="block text-sm font-medium text-gray-700">Note</label>
                     <textarea id="newShipmentNote" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" rows="3" placeholder="Note aggiuntive" style="text-transform: uppercase;"></textarea>
@@ -717,8 +750,16 @@ async function saveNewShipment() {
     const magazzino = document.getElementById('newShipmentMagazzino').value;
     const linkTracking = document.getElementById('newShipmentLinkTracking').value;
     const stato = document.getElementById('newShipmentStato').value;
+    const dataConsegna = document.getElementById('newShipmentDataConsegna').value;
     const note = document.getElementById('newShipmentNote').value;
     const ddtFile = document.getElementById('newShipmentDDTFile').files[0];
+
+    // Check if DDT number already exists
+    const existingShipment = Object.values(spedizioni).find(s => s.nrDDT === nrDDT);
+    if (existingShipment) {
+        showNotification('Errore: Il numero DDT è già presente in elenco', 'error');
+        return;
+    }
 
     let ddtBase64 = '';
     if (ddtFile) {
@@ -736,7 +777,7 @@ async function saveNewShipment() {
         dataPreparazioneMerce: dataPreparazioneMerce,
         stato: stato,
         ultimoMagazzino: magazzino,
-        dataConsegna: '',
+        dataConsegna: dataConsegna,
         linkTracking: linkTracking,
         note: note,
         ddtFile: ddtBase64
@@ -856,18 +897,24 @@ async function saveShipmentEdit(id) {
         ddtBase64 = await readFileAsBase64(ddtFile);
     }
     
+    const oldStato = spedizioni[id].stato;
+    const oldMagazzino = spedizioni[id].ultimoMagazzino;
+    const newStato = document.getElementById('editShipmentStato').value;
+    const newMagazzino = document.getElementById('editShipmentMagazzino').value;
+    
     spedizioni[id] = {
         id: id,
         nrDDT: spedizioni[id].nrDDT,
         codiceCliente: spedizioni[id].codiceCliente,
         vettore: spedizioni[id].vettore,
         dataPreparazioneMerce: spedizioni[id].dataPreparazioneMerce,
-        stato: document.getElementById('editShipmentStato').value,
-        ultimoMagazzino: document.getElementById('editShipmentMagazzino').value,
+        stato: newStato,
+        ultimoMagazzino: newMagazzino,
         dataConsegna: document.getElementById('editShipmentDataConsegna').value,
         linkTracking: document.getElementById('editShipmentLinkTracking').value,
         note: document.getElementById('editShipmentNote').value,
-        ddtFile: ddtBase64
+        ddtFile: ddtBase64,
+        lastUpdateDate: new Date().toISOString().split('T')[0] // Update last update date
     };
 
     saveShipments();
