@@ -1187,8 +1187,12 @@ function loadClientsTable() {
 
     clientCodes.forEach(codiceCliente => {
         const clientData = clienti[codiceCliente];
+        console.log('Client data for', codiceCliente, ':', clientData, 'Type:', typeof clientData);
+        
         const codiceUtente = typeof clientData === 'object' ? clientData.userNumber : clientData;
         const nomeCliente = typeof clientData === 'object' ? clientData.nome : '';
+        
+        console.log('Extracted - User:', codiceUtente, 'Name:', nomeCliente);
         
         const row = document.createElement('tr');
         row.className = 'editable-rate';
