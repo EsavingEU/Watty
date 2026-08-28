@@ -167,7 +167,6 @@ function loadAllShipments() {
         
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-hide-client-code">${shipment.codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
@@ -204,19 +203,19 @@ function loadUserShipments() {
     // Filter shipments by user's clients and exclude delivered >10 days
     const userShipments = shipmentIds.filter(id => {
         const shipment = spedizioni[id];
-        const clientUserNumber = clienti[shipment.codiceCliente];
+        const clientData = clienti[shipment.codiceCliente];
         const isDeliveredOld = isDeliveredMoreThan10Days(shipment);
         
         // Log for debugging user shipment visibility
-        console.log('Filtering shipment:', shipment.nrDDT, 'Client:', shipment.codiceCliente, 'ClientUserNumber:', clientUserNumber, 'CurrentUserNumber:', userNumber, 'IsDeliveredOld:', isDeliveredOld);
+        console.log('Filtering shipment:', shipment.nrDDT, 'Client:', shipment.codiceCliente, 'ClientData:', clientData, 'CurrentUserNumber:', userNumber, 'IsDeliveredOld:', isDeliveredOld);
         
         // Check if client exists and matches user number
-        if (!clientUserNumber) {
+        if (!clientData) {
             console.log('Skipping shipment - client not found in clienti map:', shipment.codiceCliente);
             return false;
         }
         
-        return clientUserNumber === userNumber && !isDeliveredOld;
+        return clientData.userNumber === userNumber && !isDeliveredOld;
     });
 
     // Populate carrier filter
@@ -238,6 +237,9 @@ function loadUserShipments() {
 
     userShipments.forEach((id, index) => {
         const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? clientData.nome : shipment.codiceCliente;
+        
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         
@@ -253,7 +255,7 @@ function loadUserShipments() {
         
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
@@ -1080,7 +1082,7 @@ function uploadClientsCSV() {
         <div class="space-y-4">
             <div class="mb-4">
                 <h4 class="text-lg font-semibold text-gray-800">Carica CSV Clienti</h4>
-                <p class="text-sm text-gray-600 mt-2">Il file CSV deve avere il formato: codice_cliente,codice_utente</p>
+                <p class="text-sm text-gray-600 mt-2">Il file CSV deve avere il formato: codice_cliente,codice_utente,nome_cliente</p>
             </div>
 
             <div>
@@ -1090,10 +1092,10 @@ function uploadClientsCSV() {
 
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
                 <p class="text-sm text-blue-800 font-semibold mb-2">Formato CSV:</p>
-                <p class="text-sm text-blue-700">codice_cliente,codice_utente</p>
-                <p class="text-sm text-blue-700 mt-1">Esempio: 1001,1</p>
-                <p class="text-sm text-blue-700 mt-1">Esempio: 1002,1</p>
-                <p class="text-sm text-blue-700 mt-1">Esempio: 1003,2</p>
+                <p class="text-sm text-blue-700">codice_cliente,codice_utente,nome_cliente</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1001,1,Mario Rossi</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1002,1,Luigi Bianchi</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1003,2,Giuseppe Verdi</p>
             </div>
 
             <div class="flex justify-end space-x-4 pt-4 border-t">
@@ -1142,16 +1144,22 @@ function processClientsCSV() {
             const separator = line.includes(';') ? ';' : ',';
             const parts = line.split(separator);
 
-            if (parts.length >= 2) {
+            if (parts.length >= 3) {
                 const codiceCliente = parts[0].trim();
                 const codiceUtente = parseInt(parts[1].trim());
+                const nomeCliente = parts[2].trim();
 
                 if (codiceCliente && !isNaN(codiceUtente)) {
-                    clienti[codiceCliente] = codiceUtente;
+                    clienti[codiceCliente] = {
+                        userNumber: codiceUtente,
+                        nome: nomeCliente
+                    };
                     successCount++;
                 } else {
                     errorCount++;
                 }
+            } else {
+                errorCount++;
             }
         });
 
@@ -1178,12 +1186,16 @@ function loadClientsTable() {
     document.getElementById('noClients').classList.add('hidden');
 
     clientCodes.forEach(codiceCliente => {
-        const codiceUtente = clienti[codiceCliente];
+        const clientData = clienti[codiceCliente];
+        const codiceUtente = typeof clientData === 'object' ? clientData.userNumber : clientData;
+        const nomeCliente = typeof clientData === 'object' ? clientData.nome : '';
+        
         const row = document.createElement('tr');
         row.className = 'editable-rate';
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${codiceUtente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${nomeCliente}</td>
         `;
         tbody.appendChild(row);
     });
