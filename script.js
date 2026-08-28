@@ -342,10 +342,14 @@ function loadDeliveredShipments() {
 
     deliveredShipments.forEach((id, index) => {
         const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider user-only">${clientName}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
@@ -389,10 +393,13 @@ function filterDeliveredShipments() {
     // Apply filters
     const filteredShipments = deliveredShipments.filter(id => {
         const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
 
         // Search filter
         const matchesSearch = !searchTerm ||
             shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            clientName.toLowerCase().includes(searchTerm) ||
             shipment.vettore.toLowerCase().includes(searchTerm);
 
         // Carrier filter
@@ -429,10 +436,14 @@ function filterDeliveredShipments() {
 
     filteredShipments.forEach((id, index) => {
         const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider user-only">${clientName}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
@@ -1637,9 +1648,17 @@ function updateUIForLoggedInUser() {
         document.getElementById('adminLinkBtn').classList.remove('hidden');
         // Show admin-only columns
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+        // Hide user-only columns
+        document.querySelectorAll('.user-only').forEach(el => el.classList.add('hidden'));
+        // Add admin-view class to body
+        document.body.classList.add('admin-view');
     } else {
         // Hide admin-only columns
         document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+        // Show user-only columns
+        document.querySelectorAll('.user-only').forEach(el => el.classList.remove('hidden'));
+        // Remove admin-view class from body
+        document.body.classList.remove('admin-view');
     }
 
     // Show saved calculations link
