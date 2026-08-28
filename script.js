@@ -156,7 +156,7 @@ function loadAllShipments() {
         }
         
         // Add green highlighting for delivered shipments
-        if (shipment.stato === 'Consegnato') {
+        if (shipment.stato === 'Consegnato' && shipment.dataConsegna) {
             row.classList.add('delivered-shipment');
         }
         
@@ -346,7 +346,6 @@ function loadDeliveredShipments() {
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
@@ -394,7 +393,6 @@ function filterDeliveredShipments() {
         // Search filter
         const matchesSearch = !searchTerm ||
             shipment.nrDDT.toLowerCase().includes(searchTerm) ||
-            shipment.codiceCliente.toLowerCase().includes(searchTerm) ||
             shipment.vettore.toLowerCase().includes(searchTerm);
 
         // Carrier filter
@@ -435,7 +433,6 @@ function filterDeliveredShipments() {
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
