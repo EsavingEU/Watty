@@ -1187,12 +1187,8 @@ function loadClientsTable() {
 
     clientCodes.forEach(codiceCliente => {
         const clientData = clienti[codiceCliente];
-        console.log('Client data for', codiceCliente, ':', clientData, 'Type:', typeof clientData);
-        
         const codiceUtente = typeof clientData === 'object' ? clientData.userNumber : clientData;
         const nomeCliente = typeof clientData === 'object' ? clientData.nome : '';
-        
-        console.log('Extracted - User:', codiceUtente, 'Name:', nomeCliente);
         
         const row = document.createElement('tr');
         row.className = 'editable-rate';
@@ -2469,14 +2465,29 @@ async function loadClients() {
 
 async function saveClients() {
     try {
-        // Save to Firestore
+        // Normalize client data before saving to Firestore
+        const normalizedClients = {};
         for (const codice in clienti) {
-            await db.collection('clients').doc(codice).set(clienti[codice]);
+            const clientData = clienti[codice];
+            if (typeof clientData === 'object' && clientData !== null) {
+                normalizedClients[codice] = clientData;
+            } else {
+                // Convert old format (number) to new format (object)
+                normalizedClients[codice] = {
+                    userNumber: clientData,
+                    nome: ''
+                };
+            }
+        }
+        
+        // Save to Firestore
+        for (const codice in normalizedClients) {
+            await db.collection('clients').doc(codice).set(normalizedClients[codice]);
         }
         console.log('Clients saved to Firestore');
 
         // Also save to localStorage as backup
-        localStorage.setItem('clienti', JSON.stringify(clienti));
+        localStorage.setItem('clienti', JSON.stringify(normalizedClients));
     } catch (error) {
         console.error('Error saving clients to Firestore:', error);
         // Fallback to localStorage on error
