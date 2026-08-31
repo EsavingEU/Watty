@@ -706,7 +706,7 @@ function addNewShipment() {
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
-                    <input type="url" id="newShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="https://... (per TNT inserisci solo il riferimento)">
+                    <input type="text" id="newShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="https://... (per TNT inserisci solo il riferimento)">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Stato</label>
@@ -871,7 +871,7 @@ function editShipment(id) {
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
-                    <input type="url" id="editShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.linkTracking || ''}" placeholder="https://... (per TNT inserisci solo il riferimento)">
+                    <input type="text" id="editShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.linkTracking || ''}" placeholder="https://... (per TNT inserisci solo il riferimento)">
                 </div>
                 <div class="md:col-span-2">
                     <label class="block text-sm font-medium text-gray-700">Note</label>
