@@ -1133,6 +1133,8 @@ function processClientsCSV() {
     reader.onload = function(e) {
         const text = e.target.result;
         const lines = text.split('\n');
+        
+        console.log('Total lines in CSV:', lines.length);
 
         let successCount = 0;
         let errorCount = 0;
@@ -1165,11 +1167,16 @@ function processClientsCSV() {
                     successCount++;
                 } else {
                     errorCount++;
+                    console.log('Error processing line', index, ':', line);
                 }
             } else {
                 errorCount++;
+                console.log('Invalid line format at index', index, ':', line);
             }
         });
+
+        console.log('CSV processing complete. Success:', successCount, 'Errors:', errorCount);
+        console.log('Total clients in memory after processing:', Object.keys(clienti).length);
 
         saveClients();
         closeRateModal();
@@ -1185,6 +1192,7 @@ function loadClientsTable() {
     tbody.innerHTML = '';
 
     const clientCodes = Object.keys(clienti);
+    console.log('Total clients in database:', clientCodes.length);
 
     if (clientCodes.length === 0) {
         document.getElementById('noClients').classList.remove('hidden');
@@ -1193,6 +1201,7 @@ function loadClientsTable() {
 
     document.getElementById('noClients').classList.add('hidden');
 
+    let renderedCount = 0;
     clientCodes.forEach(codiceCliente => {
         const clientData = clienti[codiceCliente];
         const codiceUtente = typeof clientData === 'object' ? clientData.userNumber : clientData;
@@ -1206,7 +1215,10 @@ function loadClientsTable() {
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${nomeCliente}</td>
         `;
         tbody.appendChild(row);
+        renderedCount++;
     });
+    
+    console.log('Clients rendered in table:', renderedCount);
 }
 
 function loadCarriersTable() {
