@@ -2471,13 +2471,13 @@ async function loadClients() {
             snapshot.forEach(doc => {
                 clienti[doc.id] = doc.data();
             });
-            console.log('Clients loaded from Firestore');
+            console.log('Clients loaded from Firestore, count:', Object.keys(clienti).length);
         } else {
             // Fallback to localStorage if Firestore is empty
             const savedClients = localStorage.getItem('clienti');
             if (savedClients) {
                 clienti = JSON.parse(savedClients);
-                console.log('Clients loaded from localStorage (fallback)');
+                console.log('Clients loaded from localStorage (fallback), count:', Object.keys(clienti).length);
             }
         }
     } catch (error) {
@@ -2486,7 +2486,7 @@ async function loadClients() {
         const savedClients = localStorage.getItem('clienti');
         if (savedClients) {
             clienti = JSON.parse(savedClients);
-            console.log('Clients loaded from localStorage (error fallback)');
+            console.log('Clients loaded from localStorage (error fallback), count:', Object.keys(clienti).length);
         }
     }
 }
