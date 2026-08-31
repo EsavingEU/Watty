@@ -706,7 +706,7 @@ function addNewShipment() {
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
-                    <input type="url" id="newShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="https://...">
+                    <input type="url" id="newShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="https://... (per TNT inserisci solo il riferimento)">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Stato</label>
@@ -758,11 +758,16 @@ async function saveNewShipment() {
     const vettore = document.getElementById('newShipmentVettore').value;
     const dataPreparazioneMerce = document.getElementById('newShipmentDataPreparazione').value;
     const magazzino = document.getElementById('newShipmentMagazzino').value;
-    const linkTracking = document.getElementById('newShipmentLinkTracking').value;
+    let linkTracking = document.getElementById('newShipmentLinkTracking').value;
     const stato = document.getElementById('newShipmentStato').value;
     const dataConsegna = document.getElementById('newShipmentDataConsegna').value;
     const note = document.getElementById('newShipmentNote').value;
     const ddtFile = document.getElementById('newShipmentDDTFile').files[0];
+
+    // Auto-complete TNT tracking link
+    if (vettore === 'TNT' && linkTracking && !linkTracking.startsWith('http')) {
+        linkTracking = 'https://www.tnt.it/tracking/getTrack.html?wt=1&consigNos=' + linkTracking;
+    }
 
     // Check if DDT number already exists
     const existingShipment = Object.values(spedizioni).find(s => s.nrDDT === nrDDT);
@@ -866,7 +871,7 @@ function editShipment(id) {
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
-                    <input type="url" id="editShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.linkTracking || ''}">
+                    <input type="url" id="editShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.linkTracking || ''}" placeholder="https://... (per TNT inserisci solo il riferimento)">
                 </div>
                 <div class="md:col-span-2">
                     <label class="block text-sm font-medium text-gray-700">Note</label>
@@ -911,6 +916,12 @@ async function saveShipmentEdit(id) {
     const oldMagazzino = spedizioni[id].ultimoMagazzino;
     const newStato = document.getElementById('editShipmentStato').value;
     const newMagazzino = document.getElementById('editShipmentMagazzino').value;
+    let linkTracking = document.getElementById('editShipmentLinkTracking').value;
+    
+    // Auto-complete TNT tracking link
+    if (spedizioni[id].vettore === 'TNT' && linkTracking && !linkTracking.startsWith('http')) {
+        linkTracking = 'https://www.tnt.it/tracking/getTrack.html?wt=1&consigNos=' + linkTracking;
+    }
     
     spedizioni[id] = {
         id: id,
@@ -921,7 +932,7 @@ async function saveShipmentEdit(id) {
         stato: newStato,
         ultimoMagazzino: newMagazzino,
         dataConsegna: document.getElementById('editShipmentDataConsegna').value,
-        linkTracking: document.getElementById('editShipmentLinkTracking').value,
+        linkTracking: linkTracking,
         note: document.getElementById('editShipmentNote').value,
         ddtFile: ddtBase64,
         lastUpdateDate: new Date().toISOString().split('T')[0] // Update last update date
