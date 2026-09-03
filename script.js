@@ -2556,13 +2556,13 @@ async function loadShipments() {
             snapshot.forEach(doc => {
                 spedizioni[doc.id] = doc.data();
             });
-            console.log('Shipments loaded from Firestore');
+            console.log('Shipments loaded from Firestore, count:', Object.keys(spedizioni).length);
         } else {
             // Fallback to localStorage if Firestore is empty
             const savedShipments = localStorage.getItem('spedizioni');
             if (savedShipments) {
                 spedizioni = JSON.parse(savedShipments);
-                console.log('Shipments loaded from localStorage (fallback)');
+                console.log('Shipments loaded from localStorage (fallback), count:', Object.keys(spedizioni).length);
             }
         }
     } catch (error) {
@@ -2571,21 +2571,23 @@ async function loadShipments() {
         const savedShipments = localStorage.getItem('spedizioni');
         if (savedShipments) {
             spedizioni = JSON.parse(savedShipments);
-            console.log('Shipments loaded from localStorage (error fallback)');
+            console.log('Shipments loaded from localStorage (error fallback), count:', Object.keys(spedizioni).length);
         }
     }
 }
 
 async function saveShipments() {
     try {
+        console.log('Saving shipments to Firestore, count:', Object.keys(spedizioni).length);
         // Save to Firestore
         for (const id in spedizioni) {
             await db.collection('shipments').doc(id).set(spedizioni[id]);
         }
-        console.log('Shipments saved to Firestore');
+        console.log('Shipments saved to Firestore successfully');
 
         // Also save to localStorage as backup
         localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+        console.log('Shipments saved to localStorage successfully');
     } catch (error) {
         console.error('Error saving shipments to Firestore:', error);
         // Fallback to localStorage on error
