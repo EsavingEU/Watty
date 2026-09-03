@@ -798,7 +798,19 @@ async function saveNewShipment() {
         ddtFile: ddtBase64
     };
 
-    saveShipments();
+    // Save only the new shipment to Firestore (not all shipments)
+    try {
+        await db.collection('shipments').doc(shipmentId).set(spedizioni[shipmentId]);
+        console.log('New shipment saved to Firestore:', shipmentId);
+    } catch (error) {
+        console.error('Error saving new shipment to Firestore:', error);
+        showNotification('Errore nel salvataggio su Firestore: ' + error.message, 'error');
+        return;
+    }
+
+    // Save all shipments to localStorage as backup
+    localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+    
     closeRateModal();
     loadAllShipments();
     showNotification('Spedizione aggiunta con successo!', 'success');
@@ -938,7 +950,19 @@ async function saveShipmentEdit(id) {
         lastUpdateDate: new Date().toISOString().split('T')[0] // Update last update date
     };
 
-    saveShipments();
+    // Save only the modified shipment to Firestore (not all shipments)
+    try {
+        await db.collection('shipments').doc(id).set(spedizioni[id]);
+        console.log('Modified shipment saved to Firestore:', id);
+    } catch (error) {
+        console.error('Error saving modified shipment to Firestore:', error);
+        showNotification('Errore nel salvataggio su Firestore: ' + error.message, 'error');
+        return;
+    }
+
+    // Save all shipments to localStorage as backup
+    localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+    
     closeRateModal();
     loadAllShipments();
     showNotification('Spedizione modificata con successo!', 'success');
