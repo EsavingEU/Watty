@@ -668,6 +668,10 @@ function filterUserShipments() {
 function addNewShipment() {
     const modal = document.getElementById('rateModal');
     const content = document.getElementById('rateModalContent');
+    const title = document.getElementById('rateModalTitle');
+
+    // Set modal title
+    title.textContent = 'Aggiungi Nuova Spedizione';
 
     // Get available carriers
     const carrierOptions = Object.keys(vettori).map(nome =>
@@ -839,6 +843,10 @@ function editShipment(id) {
 
     const modal = document.getElementById('rateModal');
     const content = document.getElementById('rateModalContent');
+    const title = document.getElementById('rateModalTitle');
+
+    // Set modal title
+    title.textContent = 'Modifica Spedizione ' + id;
 
     content.innerHTML = `
         <form id="editShipmentForm" class="space-y-4">
@@ -868,10 +876,6 @@ function editShipment(id) {
                     <input type="text" id="editShipmentMagazzino" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" value="${shipment.ultimoMagazzino}" style="text-transform: uppercase;">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-gray-700">Data Consegna</label>
-                    <input type="date" id="editShipmentDataConsegna" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.dataConsegna || ''}">
-                </div>
-                <div>
                     <label class="block text-sm font-medium text-gray-700">Stato</label>
                     <select id="editShipmentStato" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
                         <option value="Preparato" ${shipment.stato === 'Preparato' ? 'selected' : ''}>Preparato</option>
@@ -880,6 +884,10 @@ function editShipment(id) {
                         <option value="In consegna" ${shipment.stato === 'In consegna' ? 'selected' : ''}>In consegna</option>
                         <option value="Consegnato" ${shipment.stato === 'Consegnato' ? 'selected' : ''}>Consegnato</option>
                     </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Consegna</label>
+                    <input type="date" id="editShipmentDataConsegna" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.dataConsegna || ''}">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
@@ -929,10 +937,27 @@ async function saveShipmentEdit(id) {
     const newStato = document.getElementById('editShipmentStato').value;
     const newMagazzino = document.getElementById('editShipmentMagazzino').value;
     let linkTracking = document.getElementById('editShipmentLinkTracking').value;
+    const newDataConsegna = document.getElementById('editShipmentDataConsegna').value;
     
     // Auto-complete TNT tracking link
     if (spedizioni[id].vettore === 'TNT' && linkTracking && !linkTracking.startsWith('http')) {
         linkTracking = 'https://www.tnt.it/tracking/getTrack.html?wt=1&consigNos=' + linkTracking;
+    }
+    
+    // Create temporary shipment object to check if it will be delivered >10 days
+    const tempShipment = {
+        ...spedizioni[id],
+        stato: newStato,
+        dataConsegna: newDataConsegna
+    };
+    
+    // Remove PDF when shipment moves to delivered >10 days (historical) to save Firestore space
+    const wasNotHistorical = !isDeliveredMoreThan10Days(spedizioni[id]);
+    const willBeHistorical = isDeliveredMoreThan10Days(tempShipment);
+    
+    if (wasNotHistorical && willBeHistorical && ddtBase64) {
+        console.log('Removing PDF for shipment moving to historical (delivered >10 days):', id);
+        ddtBase64 = '';
     }
     
     spedizioni[id] = {
@@ -943,7 +968,7 @@ async function saveShipmentEdit(id) {
         dataPreparazioneMerce: spedizioni[id].dataPreparazioneMerce,
         stato: newStato,
         ultimoMagazzino: newMagazzino,
-        dataConsegna: document.getElementById('editShipmentDataConsegna').value,
+        dataConsegna: newDataConsegna,
         linkTracking: linkTracking,
         note: document.getElementById('editShipmentNote').value,
         ddtFile: ddtBase64,
@@ -954,6 +979,9 @@ async function saveShipmentEdit(id) {
     try {
         await db.collection('shipments').doc(id).set(spedizioni[id]);
         console.log('Modified shipment saved to Firestore:', id);
+        if (wasNotHistorical && willBeHistorical) {
+            console.log('PDF removed from historical shipment (delivered >10 days) to save space');
+        }
     } catch (error) {
         console.error('Error saving modified shipment to Firestore:', error);
         showNotification('Errore nel salvataggio su Firestore: ' + error.message, 'error');
