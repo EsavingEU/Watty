@@ -808,8 +808,8 @@ async function saveNewShipment() {
         return;
     }
 
-    // Save all shipments to localStorage as backup
-    localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+    // Don't save shipments to localStorage anymore (quota exceeded)
+    // Firestore is now the primary storage for shipments
     
     closeRateModal();
     loadAllShipments();
@@ -960,8 +960,8 @@ async function saveShipmentEdit(id) {
         return;
     }
 
-    // Save all shipments to localStorage as backup
-    localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+    // Don't save shipments to localStorage anymore (quota exceeded)
+    // Firestore is now the primary storage for shipments
     
     closeRateModal();
     loadAllShipments();
@@ -989,8 +989,8 @@ async function deleteShipment(id) {
             // Delete from local object
             delete spedizioni[id];
             
-            // Save to localStorage as backup
-            localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
+            // Don't save shipments to localStorage anymore (quota exceeded)
+            // Firestore is now the primary storage for shipments
             
             loadAllShipments();
             showNotification('Spedizione eliminata con successo!', 'success');
@@ -2572,7 +2572,7 @@ function saveUsers() {
 
 async function loadShipments() {
     try {
-        // Try loading from Firestore first
+        // Load from Firestore only (localStorage quota exceeded)
         const snapshot = await db.collection('shipments').get();
 
         if (!snapshot.empty) {
@@ -2582,42 +2582,20 @@ async function loadShipments() {
             });
             console.log('Shipments loaded from Firestore, count:', Object.keys(spedizioni).length);
         } else {
-            // Fallback to localStorage if Firestore is empty
-            const savedShipments = localStorage.getItem('spedizioni');
-            if (savedShipments) {
-                spedizioni = JSON.parse(savedShipments);
-                console.log('Shipments loaded from localStorage (fallback), count:', Object.keys(spedizioni).length);
-            }
+            console.log('No shipments found in Firestore');
+            spedizioni = {};
         }
     } catch (error) {
         console.error('Error loading shipments from Firestore:', error);
-        // Fallback to localStorage on error
-        const savedShipments = localStorage.getItem('spedizioni');
-        if (savedShipments) {
-            spedizioni = JSON.parse(savedShipments);
-            console.log('Shipments loaded from localStorage (error fallback), count:', Object.keys(spedizioni).length);
-        }
+        showNotification('Errore nel caricamento delle spedizioni: ' + error.message, 'error');
+        spedizioni = {};
     }
 }
 
 async function saveShipments() {
-    try {
-        console.log('Saving shipments to Firestore, count:', Object.keys(spedizioni).length);
-        // Save to Firestore
-        for (const id in spedizioni) {
-            await db.collection('shipments').doc(id).set(spedizioni[id]);
-        }
-        console.log('Shipments saved to Firestore successfully');
-
-        // Also save to localStorage as backup
-        localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
-        console.log('Shipments saved to localStorage successfully');
-    } catch (error) {
-        console.error('Error saving shipments to Firestore:', error);
-        // Fallback to localStorage on error
-        localStorage.setItem('spedizioni', JSON.stringify(spedizioni));
-        console.log('Shipments saved to localStorage (error fallback)');
-    }
+    // This function is deprecated - shipments are now saved individually to Firestore
+    // to avoid quota issues. Use saveNewShipment, saveShipmentEdit, or deleteShipment instead.
+    console.warn('saveShipments() is deprecated. Individual shipment operations are now used.');
 }
 
 function loadRatesTable() {
