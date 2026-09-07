@@ -556,7 +556,6 @@ function filterShipments() {
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
@@ -2526,7 +2525,16 @@ async function saveCarriers() {
 
 async function loadClients() {
     try {
-        // Try loading from Firestore first
+        // Try loading from localStorage first (primary storage for clients)
+        const savedClients = localStorage.getItem('clienti');
+        if (savedClients) {
+            clienti = JSON.parse(savedClients);
+            console.log('Clients loaded from localStorage (primary), count:', Object.keys(clienti).length);
+            return;
+        }
+
+        // Fallback to Firestore only if localStorage is empty
+        console.log('No clients in localStorage, loading from Firestore...');
         const snapshot = await db.collection('clients').get();
 
         if (!snapshot.empty) {
@@ -2534,22 +2542,23 @@ async function loadClients() {
             snapshot.forEach(doc => {
                 clienti[doc.id] = doc.data();
             });
-            console.log('Clients loaded from Firestore, count:', Object.keys(clienti).length);
+            console.log('Clients loaded from Firestore (fallback), count:', Object.keys(clienti).length);
+            
+            // Save to localStorage for future use
+            localStorage.setItem('clienti', JSON.stringify(clienti));
         } else {
-            // Fallback to localStorage if Firestore is empty
-            const savedClients = localStorage.getItem('clienti');
-            if (savedClients) {
-                clienti = JSON.parse(savedClients);
-                console.log('Clients loaded from localStorage (fallback), count:', Object.keys(clienti).length);
-            }
+            console.log('No clients found in Firestore');
+            clienti = {};
         }
     } catch (error) {
         console.error('Error loading clients from Firestore:', error);
-        // Fallback to localStorage on error
+        // Try localStorage as final fallback
         const savedClients = localStorage.getItem('clienti');
         if (savedClients) {
             clienti = JSON.parse(savedClients);
             console.log('Clients loaded from localStorage (error fallback), count:', Object.keys(clienti).length);
+        } else {
+            clienti = {};
         }
     }
 }
