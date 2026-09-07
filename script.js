@@ -1,12 +1,20 @@
 // Firebase Configuration
-const firebaseConfig = {
-    apiKey: "AIzaSyA8Wjt-sgNp2kpQYNWmIihy_3E4xYjIoco",
-    authDomain: "wattyesaving.firebaseapp.com",
-    projectId: "wattyesaving",
-    storageBucket: "wattyesaving.firebasestorage.app",
-    messagingSenderId: "101400604075",
-    appId: "1:101400604075:web:6d1434a8866ff48fb376ee"
-};
+// Load from config.js for security (API key is not hardcoded)
+let firebaseConfig;
+try {
+    firebaseConfig = window.firebaseConfig;
+} catch (error) {
+    console.error('Error loading Firebase config from config.js:', error);
+    // Fallback configuration (should not be used in production)
+    firebaseConfig = {
+        apiKey: "AIzaSyAWJ5h0Bbis4QcYgJNHBj8Clt8tIeKjCSE",
+        authDomain: "wattyesaving.firebaseapp.com",
+        projectId: "wattyesaving",
+        storageBucket: "wattyesaving.firebasestorage.app",
+        messagingSenderId: "101400604075",
+        appId: "1:101400604075:web:6d1434a8866ff48fb376ee"
+    };
+}
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
