@@ -1,6 +1,6 @@
 // Firebase Configuration
 const firebaseConfig = {
-    apiKey: "AIzaSyCsX-02rmrO4SRmoTiksTtbCREoBxfFgBI",
+    apiKey: "AIzaSyBP1t3ON8kemZrY5yzV1jNWwlJcV2bat4o",
     authDomain: "wattyesaving.firebaseapp.com",
     projectId: "wattyesaving",
     storageBucket: "wattyesaving.firebasestorage.app",
