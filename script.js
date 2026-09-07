@@ -1,20 +1,10 @@
 // Firebase Configuration
 // For GitHub Pages deployment, API key is included with domain restrictions
 // For local development, config.js is used if available
-let firebaseConfig;
-
-// Try to load from config.js first (for local development)
-try {
-    if (window.firebaseConfig) {
-        firebaseConfig = window.firebaseConfig;
-        console.log('Firebase config loaded from config.js');
-    } else {
-        throw new Error('config.js not found');
-    }
-} catch (error) {
+if (!window.firebaseConfig) {
     console.log('config.js not found, using built-in configuration for GitHub Pages');
     // Built-in configuration for GitHub Pages (with domain restrictions)
-    firebaseConfig = {
+    window.firebaseConfig = {
         apiKey: "AIzaSyCsX-02rmrO4SRmoTiksTtbCREoBxfFgBI",
         authDomain: "wattyesaving.firebaseapp.com",
         projectId: "wattyesaving",
@@ -22,7 +12,11 @@ try {
         messagingSenderId: "101400604075",
         appId: "1:101400604075:web:6d1434a8866ff48fb376ee"
     };
+} else {
+    console.log('Firebase config loaded from config.js');
 }
+
+const firebaseConfig = window.firebaseConfig;
 
 // Initialize Firebase
 firebase.initializeApp(firebaseConfig);
