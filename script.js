@@ -1,13 +1,21 @@
 // Firebase Configuration
-// Load from config.js for security (API key is not hardcoded)
+// For GitHub Pages deployment, API key is included with domain restrictions
+// For local development, config.js is used if available
 let firebaseConfig;
+
+// Try to load from config.js first (for local development)
 try {
-    firebaseConfig = window.firebaseConfig;
+    if (window.firebaseConfig) {
+        firebaseConfig = window.firebaseConfig;
+        console.log('Firebase config loaded from config.js');
+    } else {
+        throw new Error('config.js not found');
+    }
 } catch (error) {
-    console.error('Error loading Firebase config from config.js:', error);
-    // Fallback configuration (should not be used in production)
+    console.log('config.js not found, using built-in configuration for GitHub Pages');
+    // Built-in configuration for GitHub Pages (with domain restrictions)
     firebaseConfig = {
-        apiKey: "AIzaSyAWJ5h0Bbis4QcYgJNHBj8Clt8tIeKjCSE",
+        apiKey: "AIzaSyCsX-02rmrO4SRmoTiksTtbCREoBxfFgBI",
         authDomain: "wattyesaving.firebaseapp.com",
         projectId: "wattyesaving",
         storageBucket: "wattyesaving.firebasestorage.app",
