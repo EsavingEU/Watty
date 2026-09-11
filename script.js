@@ -1934,12 +1934,16 @@ function initProvinceAutocomplete() {
             return;
         }
 
-        suggestions.innerHTML = limitedMatches.map(match => `
-            <div class="px-4 py-3 hover:bg-gray-100 cursor-pointer transition" onclick="selectProvincia('${match.key}', '${match.nome} - ${match.sigla}')">
+        suggestions.innerHTML = limitedMatches.map(match => {
+            const escapedKey = match.key.replace(/'/g, "\\'");
+            const escapedDisplay = `${match.nome} - ${match.sigla}`.replace(/'/g, "\\'");
+            return `
+            <div class="px-4 py-3 hover:bg-gray-100 cursor-pointer transition" onclick="selectProvincia('${escapedKey}', '${escapedDisplay}')">
                 <div class="text-sm font-medium text-gray-900">${match.nome}</div>
                 <div class="text-xs text-gray-500">${match.sigla}</div>
             </div>
-        `).join('');
+        `;
+        }).join('');
 
         suggestions.classList.remove('hidden');
         console.log('Suggestions shown:', limitedMatches.length);
