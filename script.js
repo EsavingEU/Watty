@@ -105,7 +105,7 @@ function loadTrackingSection() {
     const adminView = document.getElementById('adminTrackingView');
     const userView = document.getElementById('userTrackingView');
 
-    if (currentUser.role === 'admin') {
+    if (currentUser.role === 'admin' || currentUser.role === 'god') {
         adminView.classList.remove('hidden');
         userView.classList.add('hidden');
         loadAllShipments();
@@ -147,6 +147,9 @@ function loadAllShipments() {
 
     activeShipments.forEach((id, index) => {
         const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
         
@@ -165,8 +168,12 @@ function loadAllShipments() {
             row.classList.add('clicked-shipment');
         }
         
+        // For GOD users, show client name like regular users
+        const showClientName = currentUser.role === 'god';
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            ${showClientName ? `<td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>` : ''}
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
@@ -181,12 +188,14 @@ function loadAllShipments() {
             </td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                 ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800 mr-2" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+                ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
                 </button>
                 <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
                     <i class="fas fa-trash"></i>
                 </button>
+                ` : ''}
             </td>
         `;
         tbody.appendChild(row);
@@ -361,12 +370,14 @@ function loadDeliveredShipments() {
                 ` : '-'}
             </td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-only">
+                ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
                 </button>
                 <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
                     <i class="fas fa-trash"></i>
                 </button>
+                ` : ''}
             </td>
         `;
         tbody.appendChild(row);
@@ -455,12 +466,14 @@ function filterDeliveredShipments() {
                 ` : '-'}
             </td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-only">
+                ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
                 </button>
                 <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
                     <i class="fas fa-trash"></i>
                 </button>
+                ` : ''}
             </td>
         `;
         tbody.appendChild(row);
@@ -552,10 +565,18 @@ function filterShipments() {
 
     filteredShipments.forEach((id, index) => {
         const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
         const row = document.createElement('tr');
         row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        
+        // For GOD users, show client name like regular users
+        const showClientName = currentUser.role === 'god';
+        
         row.innerHTML = `
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            ${showClientName ? `<td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>` : ''}
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
@@ -569,12 +590,14 @@ function filterShipments() {
                 ` : '-'}
             </td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
                 </button>
                 <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
                     <i class="fas fa-trash"></i>
                 </button>
+                ` : ''}
             </td>
         `;
         tbody.appendChild(row);
@@ -840,6 +863,12 @@ function editShipment(id) {
         }
     }
 
+    // Check if user is GOD (read-only)
+    if (currentUser.role === 'god') {
+        showNotification('Gli utenti GOD non possono modificare le spedizioni', 'error');
+        return;
+    }
+
     const modal = document.getElementById('rateModal');
     const content = document.getElementById('rateModalContent');
     const title = document.getElementById('rateModalTitle');
@@ -1005,6 +1034,12 @@ async function deleteShipment(id) {
             showNotification('Solo gli amministratori possono eliminare spedizioni consegnate da più di 10 giorni', 'error');
             return;
         }
+    }
+
+    // Check if user is GOD (read-only)
+    if (currentUser.role === 'god') {
+        showNotification('Gli utenti GOD non possono eliminare le spedizioni', 'error');
+        return;
     }
 
     if (confirm(`Sei sicuro di voler eliminare la spedizione ${id}?`)) {
@@ -1717,8 +1752,8 @@ function updateUIForLoggedInUser() {
     document.getElementById('logoutBtn').classList.remove('hidden');
     document.getElementById('userName').textContent = currentUser.name;
 
-    // Show admin link if user is admin
-    if (currentUser.role === 'admin') {
+    // Show admin link if user is admin or GOD
+    if (currentUser.role === 'admin' || currentUser.role === 'god') {
         document.getElementById('adminLinkBtn').classList.remove('hidden');
         // Show admin-only columns
         document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
@@ -1726,6 +1761,19 @@ function updateUIForLoggedInUser() {
         document.querySelectorAll('.user-only').forEach(el => el.classList.add('hidden'));
         // Add admin-view class to body
         document.body.classList.add('admin-view');
+        
+        // Hide admin action buttons for GOD users
+        if (currentUser.role === 'god') {
+            const adminActionButtons = document.getElementById('adminActionButtons');
+            if (adminActionButtons) {
+                adminActionButtons.classList.add('hidden');
+            }
+            // Show client column for GOD users
+            document.querySelectorAll('.god-client-column').forEach(el => el.classList.remove('hidden'));
+        } else {
+            // Hide client column for regular admin users
+            document.querySelectorAll('.god-client-column').forEach(el => el.classList.add('hidden'));
+        }
     } else {
         // Hide admin-only columns
         document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
@@ -1825,6 +1873,45 @@ async function createFirebaseUser(email, password, name, role) {
     } catch (error) {
         console.error('Error creating user:', error);
         showNotification('Errore nella creazione utente: ' + error.message, 'error');
+        return false;
+    }
+}
+
+// Helper function to create a GOD user (read-only admin)
+// Usage: createGodUser('god@esaving.eu', 'password', 'GOD User')
+async function createGodUser(email, password, name) {
+    try {
+        console.log('Creating GOD user...');
+
+        // Create user in Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+        console.log('Firebase Auth user created');
+
+        // Save additional user data to Firestore
+        await db.collection('users').doc(email).set({
+            name: name,
+            role: 'god',
+            mustChangePassword: true,
+            userNumber: 0,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log('Firestore user data saved');
+
+        // Sign out after creation
+        await auth.signOut();
+        console.log('Signed out');
+
+        console.log('✅ GOD user created successfully!');
+        console.log(`Email: ${email}`);
+        console.log(`Password: ${password}`);
+        console.log('Please login with these credentials and change the password.');
+
+        return true;
+    } catch (error) {
+        console.error('❌ Error creating GOD user:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            console.log('User already exists. You can login with existing credentials.');
+        }
         return false;
     }
 }
@@ -3312,10 +3399,17 @@ async function loadUsersTable() {
             const email = doc.id;
             const row = document.createElement('tr');
             row.className = 'editable-rate';
+            
+            // Format role display
+            let roleDisplay = user.role;
+            if (user.role === 'admin') roleDisplay = 'Amministratore';
+            else if (user.role === 'god') roleDisplay = 'Utente GOD';
+            else if (user.role === 'user') roleDisplay = 'Utente';
+            
             row.innerHTML = `
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${email}</td>
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.name}</td>
-                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.role}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${roleDisplay}</td>
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.userNumber || 'N/A'}</td>
                 <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     ${user.mustChangePassword ? '<span class="text-red-600">No</span>' : '<span class="text-green-600">Sì</span>'}
@@ -3324,7 +3418,7 @@ async function loadUsersTable() {
                     <button onclick="resetUserPassword('${email}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Reset Password">
                         <i class="fas fa-key"></i>
                     </button>
-                    <button onclick="deleteUser('${email}')" class="text-red-600 hover:text-red-800 ${user.role === 'admin' ? 'hidden' : ''}" title="Elimina Utente">
+                    <button onclick="deleteUser('${email}')" class="text-red-600 hover:text-red-800 ${user.role === 'admin' || user.role === 'god' ? 'hidden' : ''}" title="Elimina Utente">
                         <i class="fas fa-trash"></i>
                     </button>
                 </td>
@@ -3358,10 +3452,14 @@ function addNewUser() {
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Ruolo</label>
-                    <select id="newUserRole" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <select id="newUserRole" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" onchange="updateRoleDescription()">
                         <option value="user">Utente</option>
                         <option value="admin">Amministratore</option>
+                        <option value="god">Utente GOD</option>
                     </select>
+                    <div id="roleDescription" class="mt-2 text-xs text-gray-600">
+                        Utente normale: può vedere solo le proprie spedizioni
+                    </div>
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-gray-700">Numero Utente</label>
@@ -3389,10 +3487,30 @@ function addNewUser() {
     
     modal.classList.remove('hidden');
     
+    // Initialize role description
+    updateRoleDescription();
+    
     document.getElementById('newUserForm').addEventListener('submit', function(e) {
         e.preventDefault();
         saveNewUser();
     });
+}
+
+function updateRoleDescription() {
+    const role = document.getElementById('newUserRole').value;
+    const description = document.getElementById('roleDescription');
+    
+    switch(role) {
+        case 'user':
+            description.textContent = 'Utente normale: può vedere solo le proprie spedizioni';
+            break;
+        case 'admin':
+            description.textContent = 'Amministratore: può vedere e gestire tutte le spedizioni';
+            break;
+        case 'god':
+            description.textContent = 'Utente GOD: può vedere tutte le spedizioni come admin, ma in sola lettura (visualizzazione con nome cliente)';
+            break;
+    }
 }
 
 async function saveNewUser() {
@@ -3438,8 +3556,8 @@ async function deleteUser(email) {
         }
 
         const userData = userDoc.data();
-        if (userData.role === 'admin') {
-            showNotification('Non puoi eliminare un amministratore!', 'error');
+        if (userData.role === 'admin' || userData.role === 'god') {
+            showNotification('Non puoi eliminare un amministratore o un utente GOD!', 'error');
             return;
         }
 

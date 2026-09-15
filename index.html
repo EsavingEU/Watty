@@ -257,7 +257,7 @@
 
                 <!-- Admin View -->
                 <div id="adminTrackingView" class="hidden">
-                    <div class="mb-6 flex flex-wrap gap-4">
+                    <div class="mb-6 flex flex-wrap gap-4" id="adminActionButtons">
                         <button onclick="addNewShipment()" class="bg-gradient-to-r from-green-500 to-teal-500 text-white px-4 py-2 rounded-lg hover:from-green-600 hover:to-teal-600 transition font-medium">
                             <i class="fas fa-plus mr-2"></i> Nuova Spedizione
                         </button>
@@ -299,6 +299,7 @@
                             <thead class="bg-gray-50">
                                 <tr>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nr. DDT</th>
+                                    <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile god-client-column hidden">Cliente</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">Vettore</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">Data Preparazione Merce</th>
                                     <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stato</th>
