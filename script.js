@@ -3418,7 +3418,7 @@ async function loadUsersTable() {
                     <button onclick="resetUserPassword('${email}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Reset Password">
                         <i class="fas fa-key"></i>
                     </button>
-                    <button onclick="deleteUser('${email}')" class="text-red-600 hover:text-red-800 ${user.role === 'admin' || user.role === 'god' ? 'hidden' : ''}" title="Elimina Utente">
+                    <button onclick="deleteUser('${email}')" class="text-red-600 hover:text-red-800 ${user.role === 'admin' ? 'hidden' : ''}" title="Elimina Utente">
                         <i class="fas fa-trash"></i>
                     </button>
                 </td>
@@ -3568,8 +3568,8 @@ async function deleteUser(email) {
         }
 
         const userData = userDoc.data();
-        if (userData.role === 'admin' || userData.role === 'god') {
-            showNotification('Non puoi eliminare un amministratore o un utente GOD!', 'error');
+        if (userData.role === 'admin') {
+            showNotification('Non puoi eliminare un amministratore!', 'error');
             return;
         }
 
