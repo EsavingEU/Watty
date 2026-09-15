@@ -3527,8 +3527,11 @@ async function saveNewUser() {
             return;
         }
 
-        // Save user data to Firestore only (not Firebase Auth)
-        // User will need to be created in Firebase Console separately
+        // Create user in Firebase Auth with default password
+        const userCredential = await auth.createUserWithEmailAndPassword(email, '123456');
+        console.log('Firebase Auth user created');
+
+        // Save additional user data to Firestore
         await db.collection('users').doc(email).set({
             name: name,
             role: role,
@@ -3536,13 +3539,22 @@ async function saveNewUser() {
             userNumber: parseInt(userNumber),
             createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
+        console.log('Firestore user data saved');
+
+        // Sign out after creation
+        await auth.signOut();
+        console.log('Signed out');
 
         closeRateModal();
         loadUsersTable();
-        showNotification(`Utente ${email} aggiunto a Firestore! Vai su Firebase Console -> Authentication -> Users per creare l'utente con password 123456.`, 'success');
+        showNotification(`Utente ${email} creato con successo! Password temporanea: 123456 (dovrà essere cambiata al primo accesso).`, 'success');
     } catch (error) {
         console.error('Error creating user:', error);
-        showNotification('Errore nella creazione utente: ' + error.message, 'error');
+        if (error.code === 'auth/email-already-in-use') {
+            showNotification('Utente con questa email già esistente in Firebase Authentication!', 'error');
+        } else {
+            showNotification('Errore nella creazione utente: ' + error.message, 'error');
+        }
     }
 }
 
