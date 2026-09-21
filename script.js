@@ -1654,19 +1654,48 @@ document.addEventListener('DOMContentLoaded', async function() {
     
     // Mobile menu toggle
     const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+    const mobileMenuOverlay = document.getElementById('mobileMenuOverlay');
+    const closeMobileMenu = document.getElementById('closeMobileMenu');
+    
     if (mobileMenuBtn) {
         mobileMenuBtn.addEventListener('click', function() {
-            const mobileMenu = document.getElementById('mobileMenu');
-            mobileMenu.classList.toggle('hidden');
+            mobileMenu.classList.remove('hidden');
+            mobileMenuOverlay.classList.remove('hidden');
+            setTimeout(() => {
+                mobileMenu.classList.add('translate-x-0');
+            }, 10);
         });
     }
+    
+    if (closeMobileMenu) {
+        closeMobileMenu.addEventListener('click', closeMobileMenuHandler);
+    }
+    
+    if (mobileMenuOverlay) {
+        mobileMenuOverlay.addEventListener('click', closeMobileMenuHandler);
+    }
+    
+    function closeMobileMenuHandler() {
+        mobileMenu.classList.remove('translate-x-0');
+        setTimeout(() => {
+            mobileMenu.classList.add('hidden');
+            mobileMenuOverlay.classList.add('hidden');
+        }, 300);
+    }
+    
+    // Close mobile menu when clicking on menu links
+    const mobileMenuLinks = document.querySelectorAll('.mobile-menu-link');
+    mobileMenuLinks.forEach(link => {
+        link.addEventListener('click', closeMobileMenuHandler);
+    });
     
     // Mobile admin link
     const adminLinkBtnMobile = document.getElementById('adminLinkBtnMobile');
     if (adminLinkBtnMobile) {
         adminLinkBtnMobile.addEventListener('click', function() {
             showSection('admin');
-            document.getElementById('mobileMenu').classList.add('hidden');
+            closeMobileMenuHandler();
         });
     }
     
@@ -1675,9 +1704,30 @@ document.addEventListener('DOMContentLoaded', async function() {
     if (logoutBtnMobile) {
         logoutBtnMobile.addEventListener('click', function() {
             logout();
-            document.getElementById('mobileMenu').classList.add('hidden');
+            closeMobileMenuHandler();
         });
     }
+    
+    // Navbar scroll effect
+    const navbar = document.getElementById('navbar');
+    const logoContainer = document.getElementById('logoContainer');
+    const logoText = document.getElementById('logoText');
+    
+    window.addEventListener('scroll', function() {
+        if (window.scrollY > 50) {
+            navbar.classList.add('bg-blue-900/95', 'backdrop-blur-xl', 'shadow-lg');
+            navbar.classList.remove('bg-gradient-to-r', 'from-blue-900/90', 'to-teal-800/90');
+            logoContainer.classList.add('scale-90');
+            logoText.classList.add('text-lg');
+            logoText.classList.remove('text-xl');
+        } else {
+            navbar.classList.remove('bg-blue-900/95', 'backdrop-blur-xl', 'shadow-lg');
+            navbar.classList.add('bg-gradient-to-r', 'from-blue-900/90', 'to-teal-800/90');
+            logoContainer.classList.remove('scale-90');
+            logoText.classList.remove('text-lg');
+            logoText.classList.add('text-xl');
+        }
+    });
 });
 
 function showSection(section) {
