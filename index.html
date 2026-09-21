@@ -16,51 +16,76 @@
 </head>
 <body class="bg-gradient-to-br from-blue-900 via-teal-800 to-blue-900 min-h-screen text-black">
     <!-- Navigation -->
-    <nav class="bg-white/10 backdrop-blur-lg border-b border-white/10 sticky top-0 z-50">
+    <nav id="navbar" class="bg-gradient-to-r from-blue-900/90 to-teal-800/90 backdrop-blur-lg border-b border-white/20 sticky top-0 z-50 transition-all duration-300">
         <div class="container mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between items-center py-4">
-                <div class="flex items-center space-x-3">
+                <div id="logoContainer" class="flex items-center space-x-3 transition-all duration-300">
                     <img src="logo.png" alt="eSaving Logo" class="h-10 w-auto">
-                    <span class="text-xl font-bold text-white">Calcolatore costo trasporto</span>
+                    <span id="logoText" class="text-xl font-bold text-white transition-all duration-300">Calcolatore costo trasporto</span>
                 </div>
+                
+                <!-- Desktop Navigation -->
                 <div class="hidden md:flex items-center space-x-6">
-                    <a href="#calculator" class="text-white/80 hover:text-white transition font-medium">Calcolatore</a>
-                    <a href="#saved" id="savedCalculationsLink" class="hidden text-white/80 hover:text-white transition font-medium">Calcoli Salvati</a>
-                    <a href="#tracking" id="trackingLink" class="hidden text-white/80 hover:text-white transition font-medium">Tracking</a>
-                    <a href="#delivered" id="deliveredLink" class="hidden text-white/80 hover:text-white transition font-medium">Spedizioni Consegnate</a>
-                    <a href="#login" class="text-white/80 hover:text-white transition font-medium">Login</a>
-                    <button id="adminLinkBtn" class="hidden text-white/80 hover:text-white transition font-medium">
+                    <a href="#calculator" class="text-white/90 hover:text-white transition font-medium">Calcolatore</a>
+                    <a href="#saved" id="savedCalculationsLink" class="hidden text-white/90 hover:text-white transition font-medium">Calcoli Salvati</a>
+                    <a href="#tracking" id="trackingLink" class="hidden text-white/90 hover:text-white transition font-medium">Tracking</a>
+                    <a href="#delivered" id="deliveredLink" class="hidden text-white/90 hover:text-white transition font-medium">Spedizioni Consegnate</a>
+                    <a href="#login" class="text-white/90 hover:text-white transition font-medium">Login</a>
+                    <button id="adminLinkBtn" class="hidden text-white/90 hover:text-white transition font-medium">
                         <i class="fas fa-user-shield mr-2"></i> Admin
                     </button>
-                    <button id="userMenuBtn" class="hidden text-white/80 hover:text-white transition font-medium">
+                    <button id="userMenuBtn" class="hidden text-white/90 hover:text-white transition font-medium">
                         <i class="fas fa-user mr-2"></i> <span id="userName"></span>
                     </button>
                     <button id="logoutBtn" class="hidden bg-gradient-to-r from-red-500 to-orange-500 px-4 py-2 rounded-lg hover:from-red-600 hover:to-orange-600 transition font-medium text-white">
                         <i class="fas fa-sign-out-alt mr-2"></i> Esci
                     </button>
                 </div>
+                
                 <!-- Mobile menu button -->
-                <button id="mobileMenuBtn" class="md:hidden text-white">
+                <button id="mobileMenuBtn" class="md:hidden text-white bg-white/10 p-2 rounded-lg hover:bg-white/20 transition">
                     <i class="fas fa-bars text-2xl"></i>
                 </button>
             </div>
+            
+            <!-- Mobile menu overlay -->
+            <div id="mobileMenuOverlay" class="hidden fixed inset-0 bg-black/50 z-40 md:hidden"></div>
+            
             <!-- Mobile menu -->
-            <div id="mobileMenu" class="hidden md:hidden pb-4">
-                <div class="flex flex-col space-y-3">
-                    <a href="#calculator" class="text-white/80 hover:text-white transition font-medium">Calcolatore</a>
-                    <a href="#saved" id="savedCalculationsLinkMobile" class="hidden text-white/80 hover:text-white transition font-medium">Calcoli Salvati</a>
-                    <a href="#tracking" id="trackingLinkMobile" class="hidden text-white/80 hover:text-white transition font-medium">Tracking</a>
-                    <a href="#delivered" id="deliveredLinkMobile" class="hidden text-white/80 hover:text-white transition font-medium">Spedizioni Consegnate</a>
-                    <a href="#login" class="text-white/80 hover:text-white transition font-medium">Login</a>
-                    <button id="adminLinkBtnMobile" class="hidden text-white/80 hover:text-white transition font-medium text-left">
-                        <i class="fas fa-user-shield mr-2"></i> Admin
-                    </button>
-                    <button id="userMenuBtnMobile" class="hidden text-white/80 hover:text-white transition font-medium text-left">
-                        <i class="fas fa-user mr-2"></i> <span id="userNameMobile"></span>
-                    </button>
-                    <button id="logoutBtnMobile" class="hidden bg-gradient-to-r from-red-500 to-orange-500 px-4 py-2 rounded-lg hover:from-red-600 hover:to-orange-600 transition font-medium text-white">
-                        <i class="fas fa-sign-out-alt mr-2"></i> Esci
-                    </button>
+            <div id="mobileMenu" class="hidden fixed top-0 right-0 h-full w-72 bg-gradient-to-b from-blue-900 to-teal-800 z-50 md:hidden shadow-2xl transform transition-transform duration-300">
+                <div class="p-6">
+                    <div class="flex justify-between items-center mb-8">
+                        <span class="text-xl font-bold text-white">Menu</span>
+                        <button id="closeMobileMenu" class="text-white hover:text-white/80 transition">
+                            <i class="fas fa-times text-2xl"></i>
+                        </button>
+                    </div>
+                    <div class="flex flex-col space-y-4">
+                        <a href="#calculator" class="mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium">
+                            <i class="fas fa-calculator mr-3"></i> Calcolatore
+                        </a>
+                        <a href="#saved" id="savedCalculationsLinkMobile" class="hidden mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium">
+                            <i class="fas fa-folder-open mr-3"></i> Calcoli Salvati
+                        </a>
+                        <a href="#tracking" id="trackingLinkMobile" class="hidden mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium">
+                            <i class="fas fa-truck mr-3"></i> Tracking
+                        </a>
+                        <a href="#delivered" id="deliveredLinkMobile" class="hidden mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium">
+                            <i class="fas fa-check-circle mr-3"></i> Spedizioni Consegnate
+                        </a>
+                        <a href="#login" class="mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium">
+                            <i class="fas fa-sign-in-alt mr-3"></i> Login
+                        </a>
+                        <button id="adminLinkBtnMobile" class="hidden mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium text-left">
+                            <i class="fas fa-user-shield mr-3"></i> Admin
+                        </button>
+                        <button id="userMenuBtnMobile" class="hidden mobile-menu-link text-white/90 hover:text-white hover:bg-white/10 px-4 py-3 rounded-lg transition font-medium text-left">
+                            <i class="fas fa-user mr-3"></i> <span id="userNameMobile"></span>
+                        </button>
+                        <button id="logoutBtnMobile" class="hidden bg-gradient-to-r from-red-500 to-orange-500 px-4 py-3 rounded-lg hover:from-red-600 hover:to-orange-600 transition font-medium text-white">
+                            <i class="fas fa-sign-out-alt mr-2"></i> Esci
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
