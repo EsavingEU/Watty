@@ -802,6 +802,12 @@ async function saveNewShipment() {
         return;
     }
 
+    // Check if client code exists in clienti
+    const clientExists = clienti[codiceCliente];
+    if (!clientExists) {
+        showNotification('Attenzione: Il codice cliente ' + codiceCliente + ' non è presente nell\'elenco clienti. La spedizione verrà salvata ma potrebbe non essere visibile agli utenti. Carica un CSV aggiornato nella sezione gestione clienti.', 'warning');
+    }
+
     let ddtBase64 = '';
     if (ddtFile) {
         ddtBase64 = await readFileAsBase64(ddtFile);
