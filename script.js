@@ -176,17 +176,36 @@ function loadAllShipments() {
             ${showClientName ? `<td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>` : ''}
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna || '-'}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
                 ${shipment.linkTracking ? `
                     <a href="${shipment.linkTracking}" target="_blank" onclick="markClickedShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
                 ` : '-'}
             </td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800 mr-2" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.ultimoMagazzino}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" onclick="markClickedShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
                 ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800 mr-2" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
                 ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
@@ -361,15 +380,33 @@ function loadDeliveredShipments() {
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider user-only">${clientName}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
                 ${shipment.linkTracking ? `
                     <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
                 ` : '-'}
             </td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-only">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile admin-only">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.dataConsegna}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden admin-only">
                 ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
@@ -457,15 +494,33 @@ function filterDeliveredShipments() {
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider user-only">${clientName}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
                 ${shipment.linkTracking ? `
                     <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
                 ` : '-'}
             </td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider admin-only">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile admin-only">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.dataConsegna}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden admin-only">
                 ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
@@ -579,17 +634,35 @@ function filterShipments() {
             ${showClientName ? `<td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>` : ''}
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna || '-'}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
                 ${shipment.linkTracking ? `
                     <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
                 ` : '-'}
             </td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.ultimoMagazzino}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
                 ${currentUser.role !== 'god' ? `
                 <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
                     <i class="fas fa-edit"></i>
@@ -672,11 +745,19 @@ function filterUserShipments() {
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna || '-'}</td>
             <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
-            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.ultimoMagazzino}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
                 ${shipment.linkTracking ? `
                     <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
                     <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
