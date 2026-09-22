@@ -884,7 +884,8 @@ async function saveNewShipment() {
     }
 
     // Check if client code exists in clienti
-    const clientExists = clienti[codiceCliente];
+    const clientExists = clienti[codiceCliente] !== undefined;
+    console.log('Checking client code:', codiceCliente, 'Exists:', clientExists, 'Clienti keys:', Object.keys(clienti));
     if (!clientExists) {
         showNotification('Attenzione: Il codice cliente ' + codiceCliente + ' non è presente nell\'elenco clienti. La spedizione verrà salvata ma potrebbe non essere visibile agli utenti. Carica un CSV aggiornato nella sezione gestione clienti.', 'warning');
     }
