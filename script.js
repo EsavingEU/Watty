@@ -885,7 +885,6 @@ async function saveNewShipment() {
 
     // Check if client code exists in clienti
     const clientExists = clienti[codiceCliente] !== undefined;
-    console.log('Checking client code:', codiceCliente, 'Exists:', clientExists, 'Clienti keys:', Object.keys(clienti));
     if (!clientExists) {
         showNotification('Attenzione: Il codice cliente ' + codiceCliente + ' non è presente nell\'elenco clienti. La spedizione verrà salvata ma potrebbe non essere visibile agli utenti. Carica un CSV aggiornato nella sezione gestione clienti.', 'warning');
     }
@@ -2288,13 +2287,35 @@ function calculateCost() {
     
     // Regola FASCI
     if (fascio !== 'no') {
-        const fasciBase = getRegolaValue('FASCI');
-        if (fascio === '3-4') {
-            fasciCosto = fasciBase;
-        } else if (fascio === '4-5') {
-            fasciCosto = fasciBase * 2;
-        } else if (fascio === 'oltre5') {
-            fasciCosto = fasciBase * 3;
+        // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
+        const provinceSpeciali = [
+            'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
+            'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
+            'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
+            'Benevento', 'Avellino' // Campania
+        ];
+        
+        const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+        
+        if (isProvinciaSpeciale) {
+            // Nuova regola per province speciali: fascio = nolo + supplemento
+            if (fascio === '3-4') {
+                fasciCosto = noloFinale + 50;
+            } else if (fascio === '4-5') {
+                fasciCosto = noloFinale + 75;
+            } else if (fascio === 'oltre5') {
+                fasciCosto = noloFinale + 100;
+            }
+        } else {
+            // Regola normale per altre province
+            const fasciBase = getRegolaValue('FASCI');
+            if (fascio === '3-4') {
+                fasciCosto = fasciBase;
+            } else if (fascio === '4-5') {
+                fasciCosto = fasciBase * 2;
+            } else if (fascio === 'oltre5') {
+                fasciCosto = fasciBase * 3;
+            }
         }
     }
     
