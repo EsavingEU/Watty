@@ -282,10 +282,29 @@
 
                 <!-- Admin View -->
                 <div id="adminTrackingView" class="hidden">
-                    <div class="mb-6 flex flex-wrap gap-4" id="adminActionButtons">
-                        <button onclick="addNewShipment()" class="bg-gradient-to-r from-green-500 to-teal-500 text-white px-4 py-2 rounded-lg hover:from-green-600 hover:to-teal-600 transition font-medium">
-                            <i class="fas fa-plus mr-2"></i> Nuova Spedizione
-                        </button>
+                    <div class="mb-6 flex flex-wrap gap-4 items-center justify-between" id="adminActionButtons">
+                        <div class="flex flex-wrap gap-4">
+                            <button onclick="addNewShipment()" class="bg-gradient-to-r from-green-500 to-teal-500 text-white px-4 py-2 rounded-lg hover:from-green-600 hover:to-teal-600 transition font-medium">
+                                <i class="fas fa-plus mr-2"></i> Nuova Spedizione
+                            </button>
+                        </div>
+                        <!-- DDT Continuity Badge -->
+                        <div class="relative">
+                            <button id="ddtBadgeBtn" class="hidden text-white/80 hover:text-white transition p-2 rounded-lg bg-white/10" title="Controllo continuità DDT">
+                                <i class="fas fa-exclamation-triangle text-lg"></i>
+                            </button>
+                            <div id="ddtBadgeBubble" class="hidden absolute right-0 top-full mt-2 w-72 bg-white rounded-lg shadow-xl p-4 z-50">
+                                <div class="flex items-start justify-between mb-2">
+                                    <h4 class="text-sm font-semibold text-gray-800">Controllo DDT</h4>
+                                    <button onclick="closeDDTBubble()" class="text-gray-400 hover:text-gray-600">
+                                        <i class="fas fa-times"></i>
+                                    </button>
+                                </div>
+                                <div id="ddtBadgeContent" class="text-sm text-gray-600">
+                                    <!-- Content will be loaded here -->
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
                     <!-- Search and Filters -->

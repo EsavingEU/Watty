@@ -219,6 +219,15 @@ function loadAllShipments() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function loadUserShipments() {
@@ -302,6 +311,15 @@ function loadUserShipments() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function isDeliveredMoreThan10Days(shipment) {
@@ -419,6 +437,15 @@ function loadDeliveredShipments() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function filterDeliveredShipments() {
@@ -533,6 +560,15 @@ function filterDeliveredShipments() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function populateCarrierFilter(filterId) {
@@ -675,6 +711,15 @@ function filterShipments() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function filterUserShipments() {
@@ -766,6 +811,15 @@ function filterUserShipments() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function addNewShipment() {
@@ -888,6 +942,9 @@ async function saveNewShipment() {
     if (!clientExists) {
         showNotification('Attenzione: Il codice cliente ' + codiceCliente + ' non è presente nell\'elenco clienti. La spedizione verrà salvata ma potrebbe non essere visibile agli utenti. Carica un CSV aggiornato nella sezione gestione clienti.', 'warning');
     }
+
+    // Check DDT continuity
+    checkDDTContinuity(nrDDT);
 
     let ddtBase64 = '';
     if (ddtFile) {
@@ -1109,6 +1166,21 @@ async function saveShipmentEdit(id) {
     closeRateModal();
     loadAllShipments();
     showNotification('Spedizione modificata con successo!', 'success');
+    
+    // Re-check DDT continuity after edit
+    setTimeout(() => {
+        const activeShipments = Object.keys(spedizioni).filter(id => {
+            const shipment = spedizioni[id];
+            return !isDeliveredMoreThan10Days(shipment);
+        });
+        if (activeShipments.length > 0) {
+            const highestDDT = activeShipments.reduce((max, id) => {
+                const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+                return ddt > max ? ddt : max;
+            }, 0);
+            checkDDTContinuity(highestDDT);
+        }
+    }, 100);
 }
 
 async function deleteShipment(id) {
@@ -1143,6 +1215,21 @@ async function deleteShipment(id) {
             
             loadAllShipments();
             showNotification('Spedizione eliminata con successo!', 'success');
+            
+            // Re-check DDT continuity after deletion
+            setTimeout(() => {
+                const activeShipments = Object.keys(spedizioni).filter(id => {
+                    const shipment = spedizioni[id];
+                    return !isDeliveredMoreThan10Days(shipment);
+                });
+                if (activeShipments.length > 0) {
+                    const highestDDT = activeShipments.reduce((max, id) => {
+                        const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+                        return ddt > max ? ddt : max;
+                    }, 0);
+                    checkDDTContinuity(highestDDT);
+                }
+            }, 100);
         } catch (error) {
             console.error('Error deleting shipment from Firestore:', error);
             showNotification('Errore durante l\'eliminazione della spedizione', 'error');
@@ -1440,6 +1527,15 @@ function loadCarriersTable() {
         `;
         tbody.appendChild(row);
     });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
 }
 
 function addNewCarrier() {
@@ -1788,6 +1884,24 @@ document.addEventListener('DOMContentLoaded', async function() {
             closeMobileMenuHandler();
         });
     }
+    
+    // DDT Badge button
+    const ddtBadgeBtn = document.getElementById('ddtBadgeBtn');
+    if (ddtBadgeBtn) {
+        ddtBadgeBtn.addEventListener('click', function() {
+            const bubble = document.getElementById('ddtBadgeBubble');
+            bubble.classList.toggle('hidden');
+        });
+    }
+    
+    // Close DDT bubble when clicking outside
+    document.addEventListener('click', function(event) {
+        const bubble = document.getElementById('ddtBadgeBubble');
+        const badgeBtn = document.getElementById('ddtBadgeBtn');
+        if (bubble && !bubble.classList.contains('hidden') && !badgeBtn.contains(event.target) && !bubble.contains(event.target)) {
+            bubble.classList.add('hidden');
+        }
+    });
     
     // Navbar scroll effect
     const navbar = document.getElementById('navbar');
@@ -3013,6 +3127,77 @@ function saveRateEdit(provincia) {
 
 function closeRateModal() {
     document.getElementById('rateModal').classList.add('hidden');
+}
+
+// DDT Continuity Check Functions
+function extractBaseDDT(ddtNumber) {
+    // Extract base number from DDT (remove suffixes like A, B, etc.)
+    return parseInt(ddtNumber.toString().replace(/[^0-9]/g, ''));
+}
+
+function getPreviousHundredRange(ddtNumber) {
+    const baseNumber = extractBaseDDT(ddtNumber);
+    const currentHundred = Math.floor(baseNumber / 100) * 100;
+    const previousHundred = currentHundred - 100;
+    return {
+        start: previousHundred,
+        end: currentHundred - 1
+    };
+}
+
+function checkMissingDDTsInRange(start, end) {
+    const missingDDTs = [];
+    const existingDDTs = new Set();
+    
+    // Collect all existing DDTs in the range
+    Object.values(spedizioni).forEach(shipment => {
+        const baseDDT = extractBaseDDT(shipment.nrDDT);
+        if (baseDDT >= start && baseDDT <= end) {
+            existingDDTs.add(baseDDT);
+        }
+    });
+    
+    // Find missing DDTs
+    for (let i = start; i <= end; i++) {
+        if (!existingDDTs.has(i)) {
+            missingDDTs.push(i);
+        }
+    }
+    
+    return missingDDTs;
+}
+
+function updateDDTBadge(missingDDTs, rangeStart, rangeEnd) {
+    const badgeBtn = document.getElementById('ddtBadgeBtn');
+    const badgeBubble = document.getElementById('ddtBadgeBubble');
+    const badgeContent = document.getElementById('ddtBadgeContent');
+    
+    if (missingDDTs.length > 0) {
+        badgeBtn.classList.remove('hidden');
+        badgeContent.innerHTML = `
+            <p class="mb-2">Mancano ${missingDDTs.length} DDT nel range ${rangeStart}-${rangeEnd}:</p>
+            <div class="max-h-32 overflow-y-auto">
+                <p class="text-xs">${missingDDTs.join(', ')}</p>
+            </div>
+        `;
+    } else {
+        badgeBtn.classList.add('hidden');
+        badgeBubble.classList.add('hidden');
+    }
+}
+
+function closeDDTBubble() {
+    document.getElementById('ddtBadgeBubble').classList.add('hidden');
+}
+
+function checkDDTContinuity(newDDT) {
+    const baseDDT = extractBaseDDT(newDDT);
+    const range = getPreviousHundredRange(baseDDT);
+    
+    if (range.start >= 4200) { // Only check from 4200 onwards
+        const missingDDTs = checkMissingDDTsInRange(range.start, range.end);
+        updateDDTBadge(missingDDTs, range.start, range.end);
+    }
 }
 
 function deleteRate(provincia) {
