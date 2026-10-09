@@ -2363,15 +2363,15 @@ function calculateCost() {
     let fuelCosto = 0;
     let incremento2026Costo = 0;
     
-    // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
-    const provinceSpeciali = [
-        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
-        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
-        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
-        'Benevento', 'Avellino' // Campania
-    ];
+    // Province speciali: TUTTE le province di Calabria, Sicilia, Sardegna + Avellino, Salerno, Benevento
+    const datiProvincia = tariffeProvinciali[provincia];
+    const regione = datiProvincia ? datiProvincia.regione : '';
     
-    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+    const regioniSpeciali = ['Calabria', 'Sicilia', 'Sardegna'];
+    const provinceCampaniaSpeciali = ['Benevento', 'Avellino', 'Salerno'];
+    
+    const isProvinciaSpeciale = regioniSpeciali.includes(regione) || 
+                                (regione === 'Campania' && provinceCampaniaSpeciali.includes(provincia));
     
     // Regola VIAGGIO ADR (se batteria = sì)
     if (batteria === 'si') {
