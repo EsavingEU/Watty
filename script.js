@@ -2471,7 +2471,6 @@ function calculateCost() {
     
     const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
     
-    let fuelCosto;
     if (isProvinciaSpeciale) {
         // Per province speciali: Fuel = +10% del nolo
         fuelCosto = noloFinale * 0.10;
