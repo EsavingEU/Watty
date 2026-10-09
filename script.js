@@ -2376,8 +2376,8 @@ function calculateCost() {
     // Regola VIAGGIO ADR (se batteria = sì)
     if (batteria === 'si') {
         if (isProvinciaSpeciale) {
-            // VIAGGIO ADR ARCO per province speciali
-            const adrPercentuale = getRegolaValue('VIAGGIO ADR ARCO');
+            // ADRARCO per province speciali
+            const adrPercentuale = getRegolaValue('ADRARCO');
             viaggioADRCosto = noloFinale * (adrPercentuale / 100);
         } else {
             // VIAGGIO ADR normale per altre province
