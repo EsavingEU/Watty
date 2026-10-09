@@ -2364,7 +2364,6 @@ function calculateCost() {
     let incremento2026Costo = 0;
     
     // Province speciali: TUTTE le province di Calabria, Sicilia, Sardegna + Avellino, Salerno, Benevento
-    const datiProvincia = tariffeProvinciali[provincia];
     const regione = datiProvincia ? datiProvincia.regione : '';
     
     const regioniSpeciali = ['Calabria', 'Sicilia', 'Sardegna'];
