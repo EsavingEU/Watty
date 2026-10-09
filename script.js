@@ -2379,10 +2379,28 @@ function calculateCost() {
     preavvisoTelCosto = getRegolaValue('PREAVVISO TEL.');
     preparazioneMerceCosto = getRegolaValue('PREPARAZIONE MERCE');
     
-    // Regola ASSICURAZIONE (ogni 100 kg)
-    const assicurazioneBase = getRegolaValue('ASSICURAZIONE');
-    const quintaliAssicurazione = Math.ceil(peso / 100);
-    assicurazioneCosto = assicurazioneBase * quintaliAssicurazione;
+    // Regola ASSICURAZIONE
+    // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
+    const provinceSpeciali = [
+        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
+        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
+        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
+        'Benevento', 'Avellino' // Campania
+    ];
+    
+    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+    
+    if (isProvinciaSpeciale) {
+        // ASSICURAZIONE ARCO (arrotonda kg alla decina superiore)
+        const assicurazioneBase = getRegolaValue('ASSICURAZIONE ARCO');
+        const kgArrotondati = Math.ceil(peso / 10) * 10; // Arrotonda alla decina superiore
+        assicurazioneCosto = assicurazioneBase * kgArrotondati;
+    } else {
+        // ASSICURAZIONE normale (ogni 100 kg)
+        const assicurazioneBase = getRegolaValue('ASSICURAZIONE');
+        const quintaliAssicurazione = Math.ceil(peso / 100);
+        assicurazioneCosto = assicurazioneBase * quintaliAssicurazione;
+    }
     
     // Regola FASCI
     if (fascio !== 'no') {
@@ -2441,8 +2459,27 @@ function calculateCost() {
     const incrementoPercentuale = getRegolaValue('INCREMENTO 2026');
     incremento2026Costo = sommaPrimaIncremento * (incrementoPercentuale / 100);
     
+    // Calcolo totale prima di ISTAT ARCO
+    const totalePrimaIstat = sommaPrimaIncremento + incremento2026Costo;
+    
+    // Regola ISTAT ARCO (solo per province speciali)
+    const provinceSpeciali = [
+        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
+        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
+        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
+        'Benevento', 'Avellino' // Campania
+    ];
+    
+    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+    let istatArcoCosto = 0;
+    
+    if (isProvinciaSpeciale) {
+        const istatArcoPercentuale = getRegolaValue('ISTAT ARCO');
+        istatArcoCosto = totalePrimaIstat * (istatArcoPercentuale / 100);
+    }
+    
     // Calcolo totale finale
-    const totale = sommaPrimaIncremento + incremento2026Costo;
+    const totale = totalePrimaIstat + istatArcoCosto;
     
     // Salva il calcolo corrente
     currentCalculation = {
@@ -2476,6 +2513,7 @@ function calculateCost() {
             costoPerRigaCosto: costoPerRigaCosto,
             fuelCosto: fuelCosto,
             incremento2026Costo: incremento2026Costo,
+            istatArcoCosto: istatArcoCosto,
             totale: totale
         }
     };
@@ -2503,6 +2541,7 @@ function calculateCost() {
         costoPerRigaCosto: costoPerRigaCosto,
         fuelCosto: fuelCosto,
         incremento2026Costo: incremento2026Costo,
+        istatArcoCosto: istatArcoCosto,
         totale: totale
     });
 }
