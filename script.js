@@ -2380,8 +2380,24 @@ function calculateCost() {
     
     // Regola VIAGGIO ADR (se batteria = sì)
     if (batteria === 'si') {
-        const adrPercentuale = getRegolaValue('VIAGGIO ADR');
-        viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
+        const provinceSpeciali = [
+            'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
+            'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
+            'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
+            'Benevento', 'Avellino' // Campania
+        ];
+        
+        const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+        
+        if (isProvinciaSpeciale) {
+            // Per province speciali: ADR = +10% del nolo
+            viaggioADRCosto = noloFinale * 0.10;
+        } else {
+            // Regola normale per altre province
+            const adrPercentuale = getRegolaValue('VIAGGIO ADR');
+            viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        }
     }
     
     // Regola SPONDA IDRAULICA (se sponda = sì)
@@ -2446,8 +2462,24 @@ function calculateCost() {
     const sommaParziale = noloFinale + viaggioADRCosto + spondaIdraulicaCosto + dirittoFissoCosto + preavvisoTelCosto + preparazioneMerceCosto + assicurazioneCosto + fasciCosto + palletSfusoCosto + costoPerRigaCosto;
     
     // Regola FUEL ADDIZIONALE 995 e 996 (somma delle percentuali)
-    const fuelPercentuale = getFuelPercentuale();
-    fuelCosto = sommaParziale * (fuelPercentuale / 100);
+    const provinceSpeciali = [
+        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
+        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
+        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
+        'Benevento', 'Avellino' // Campania
+    ];
+    
+    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+    
+    let fuelCosto;
+    if (isProvinciaSpeciale) {
+        // Per province speciali: Fuel = +10% del nolo
+        fuelCosto = noloFinale * 0.10;
+    } else {
+        // Regola normale per altre province
+        const fuelPercentuale = getFuelPercentuale();
+        fuelCosto = sommaParziale * (fuelPercentuale / 100);
+    }
     
     // Calcolo somma prima di incremento 2026
     const sommaPrimaIncremento = sommaParziale + fuelCosto;
@@ -2456,8 +2488,14 @@ function calculateCost() {
     const incrementoPercentuale = getRegolaValue('INCREMENTO 2026');
     incremento2026Costo = sommaPrimaIncremento * (incrementoPercentuale / 100);
     
+    // Calcolo somma prima di ISTAT
+    const sommaPrimaIstat = sommaPrimaIncremento + incremento2026Costo;
+    
+    // Regola ISTAT (5% della somma di tutti gli importi)
+    const istatCosto = sommaPrimaIstat * 0.05;
+    
     // Calcolo totale finale
-    const totale = sommaPrimaIncremento + incremento2026Costo;
+    const totale = sommaPrimaIstat + istatCosto;
     
     // Salva il calcolo corrente
     currentCalculation = {
@@ -2491,6 +2529,7 @@ function calculateCost() {
             costoPerRigaCosto: costoPerRigaCosto,
             fuelCosto: fuelCosto,
             incremento2026Costo: incremento2026Costo,
+            istatCosto: istatCosto,
             totale: totale
         }
     };
@@ -2518,6 +2557,7 @@ function calculateCost() {
         costoPerRigaCosto: costoPerRigaCosto,
         fuelCosto: fuelCosto,
         incremento2026Costo: incremento2026Costo,
+        istatCosto: istatCosto,
         totale: totale
     });
 }
