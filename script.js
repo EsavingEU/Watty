@@ -2363,10 +2363,27 @@ function calculateCost() {
     let fuelCosto = 0;
     let incremento2026Costo = 0;
     
+    // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
+    const provinceSpeciali = [
+        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
+        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
+        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
+        'Benevento', 'Avellino' // Campania
+    ];
+    
+    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
+    
     // Regola VIAGGIO ADR (se batteria = sì)
     if (batteria === 'si') {
-        const adrPercentuale = getRegolaValue('VIAGGIO ADR');
-        viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        if (isProvinciaSpeciale) {
+            // VIAGGIO ADR ARCO per province speciali
+            const adrPercentuale = getRegolaValue('VIAGGIO ADR ARCO');
+            viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        } else {
+            // VIAGGIO ADR normale per altre province
+            const adrPercentuale = getRegolaValue('VIAGGIO ADR');
+            viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        }
     }
     
     // Regola SPONDA IDRAULICA (se sponda = sì)
@@ -2378,16 +2395,6 @@ function calculateCost() {
     dirittoFissoCosto = getRegolaValue('DIRITTO FISSO');
     preavvisoTelCosto = getRegolaValue('PREAVVISO TEL.');
     preparazioneMerceCosto = getRegolaValue('PREPARAZIONE MERCE');
-    
-    // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
-    const provinceSpeciali = [
-        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
-        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
-        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
-        'Benevento', 'Avellino' // Campania
-    ];
-    
-    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
     
     // Regola ASSICURAZIONE
     if (isProvinciaSpeciale) {
