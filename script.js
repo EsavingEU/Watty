@@ -2379,7 +2379,6 @@ function calculateCost() {
     preavvisoTelCosto = getRegolaValue('PREAVVISO TEL.');
     preparazioneMerceCosto = getRegolaValue('PREPARAZIONE MERCE');
     
-    // Regola ASSICURAZIONE
     // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
     const provinceSpeciali = [
         'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
@@ -2390,6 +2389,7 @@ function calculateCost() {
     
     const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
     
+    // Regola ASSICURAZIONE
     if (isProvinciaSpeciale) {
         // ASSICURAZIONE ARCO (arrotonda kg alla decina superiore)
         const assicurazioneBase = getRegolaValue('ASSICURAZIONE ARCO');
@@ -2404,16 +2404,6 @@ function calculateCost() {
     
     // Regola FASCI
     if (fascio !== 'no') {
-        // Province speciali: Calabria, Sicilia, Sardegna, Benevento, Avellino
-        const provinceSpeciali = [
-            'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
-            'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
-            'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
-            'Benevento', 'Avellino' // Campania
-        ];
-        
-        const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
-        
         if (isProvinciaSpeciale) {
             // Nuova regola per province speciali: fascio = nolo + supplemento
             if (fascio === '3-4') {
@@ -2463,14 +2453,6 @@ function calculateCost() {
     const totalePrimaIstat = sommaPrimaIncremento + incremento2026Costo;
     
     // Regola ISTAT ARCO (solo per province speciali)
-    const provinceSpeciali = [
-        'Cosenza', 'Crotone', 'Catanzaro', 'Reggio Calabria', 'Vibo Valentia', // Calabria
-        'Palermo', 'Catania', 'Messina', 'Siracusa', 'Ragusa', 'Enna', 'Trapani', 'Agrigento', 'Caltanissetta', // Sicilia
-        'Cagliari', 'Sassari', 'Nuoro', 'Oristano', 'Sud Sardegna', // Sardegna
-        'Benevento', 'Avellino' // Campania
-    ];
-    
-    const isProvinciaSpeciale = provinceSpeciali.includes(provincia);
     let istatArcoCosto = 0;
     
     if (isProvinciaSpeciale) {
