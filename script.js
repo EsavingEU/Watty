@@ -2655,6 +2655,80 @@ function displayCalculationResult(result) {
                 </div>
             </div>
             
+            <!-- Dettaglio Calcoli (DEBUG) -->
+            <div class="bg-yellow-500/10 backdrop-blur-sm rounded-xl p-4 border border-yellow-500/30">
+                <h4 class="font-semibold text-white mb-3 flex items-center">
+                    <i class="fas fa-calculator mr-2 text-yellow-400"></i> Dettaglio Calcoli (DEBUG)
+                </h4>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Nolo Base:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.noloBase)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Moltiplicatore Quintali:</span>
+                        <span class="font-medium text-white">${result.moltiplicatoreQuintali}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Nolo Finale:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.noloFinale)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Viaggio ADR:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.viaggioADRCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Sponda Idraulica:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.spondaIdraulicaCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Diritto Fisso:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.dirittoFissoCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Preavviso Tel:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.preavvisoTelCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Preparazione Merce:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.preparazioneMerceCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Assicurazione:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.assicurazioneCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Fasci:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.fasciCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Pallet Sfuso:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.palletSfusoCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Costo per Riga:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.costoPerRigaCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Fuel:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.fuelCosto)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Incremento 2026:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.incremento2026Costo)}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">ISTAT ARCO:</span>
+                        <span class="font-medium text-white">€ ${Math.round(result.istatArcoCosto)}</span>
+                    </div>
+                    <div class="border-t border-white/20 my-2"></div>
+                    <div class="flex justify-between font-bold">
+                        <span class="text-white">TOTALE:</span>
+                        <span class="text-white">€ ${Math.round(result.totale)}</span>
+                    </div>
+                </div>
+            </div>
+            
             <!-- Risultati Finali -->
             <div class="space-y-4">
                 <div class="bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-xl p-6 border border-white/20">
