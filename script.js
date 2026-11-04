@@ -1,1493 +1,4285 @@
-// Global variables
-let warehouses = [];
-let scene, camera, renderer, controls;
-let truckMeshes = [];
-let palletMeshes = [];
-let raycaster, mouse;
-let selectedPallet = null;
-let previousMultiView = null; // Store multi-warehouse view state
+// Firebase Configuration
+const firebaseConfig = {
+    apiKey: "AIzaSyBP1t3ON8kemZrY5yzV1jNWwlJcV2bat4o",
+    authDomain: "wattyesaving.firebaseapp.com",
+    projectId: "wattyesaving",
+    storageBucket: "wattyesaving.firebasestorage.app",
+    messagingSenderId: "101400604075",
+    appId: "1:101400604075:web:6d1434a8866ff48fb376ee"
+};
 
-// Bilico dimensions (in meters)
-const TRUCK_LENGTH = 13.6;
-const TRUCK_WIDTH = 2.5;
-const TRUCK_HEIGHT = 2.6;
-const MAX_WEIGHT = 25000; // 25 tons in kg
+// Initialize Firebase
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
 
-// Color palette for same-sized pallets
-const COLOR_PALETTE = [
-    0x3b82f6, // Blue
-    0x10b981, // Emerald
-    0xf59e0b, // Amber
-    0xef4444, // Red
-    0x8b5cf6, // Violet
-    0x06b6d4, // Cyan
-    0xf97316, // Orange
-    0x84cc16, // Lime
-    0xec4899, // Pink
-    0x6366f1, // Indigo
-];
+// Application State
+let currentUser = null;
+let tariffeProvinciali = {};
+let regoleCalcolo = {};
+let currentCalculation = null;
 
-// Initialize with one warehouse
-document.addEventListener('DOMContentLoaded', function() {
-    addWarehouse();
-    initThreeJS();
-    loadSavedConfigs();
+// Load data from localStorage/Firestore on page load
+async function loadAllData() {
+    await loadRates();
+    await loadRules();
+    await loadCarriers();
+    await loadClients();
+    loadUsers(); // Keep users from localStorage for now (will migrate)
+    await loadShipments();
+    cleanupOldDDTFiles();
+}
+
+// Password hashing utility using Web Crypto API
+async function hashPassword(password) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(password);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    return hashHex;
+}
+
+// Mock user data
+const users = {
+    'logistica@esaving.eu': {
+        email: 'logistica@esaving.eu',
+        password: '123456',
+        role: 'admin',
+        name: 'Amministratore',
+        mustChangePassword: true,
+        userNumber: 0
+    }
+};
+
+// Client data structure: codice_cliente -> codice_utente
+let clienti = {
+    // Example: '1001': 1, '1002': 1, '1003': 2
+};
+
+// Carriers data structure with API keys
+let vettori = {
+    // Example: {
+    //   'Bartolini': {
+    //     nome: 'Bartolini',
+    //     apiKey: 'your_api_key',
+    //     apiUrl: 'https://api.brt.it/...',
+    //     attivo: true
+    //   }
+    // }
+};
+
+// Shipments data structure
+let spedizioni = {
+    // Example: {
+    //   'SP001': {
+    //     id: 'SP001',
+    //     nrDDT: 'DDT001',
+    //     codiceCliente: '1001',
+    //     vettore: 'Bartolini',
+    //     dataPreparazioneMerce: '2024-01-15',
+    //     stato: 'In transito',
+    //     ultimoMagazzino: 'Milano',
+    //     dataConsegna: '2024-01-16',
+    //     linkTracking: 'https://...',
+    //     note: ''
+    //   }
+    // }
+};
+
+// Tracking Section Functions
+// Global variable to track clicked shipment
+let clickedShipmentId = null;
+
+function markClickedShipment(id) {
+    clickedShipmentId = id;
+}
+
+function loadTrackingSection() {
+    if (!currentUser) {
+        showNotification('Devi effettuare il login per accedere al tracking', 'error');
+        showSection('login');
+        return;
+    }
+
+    const adminView = document.getElementById('adminTrackingView');
+    const userView = document.getElementById('userTrackingView');
+
+    if (currentUser.role === 'admin' || currentUser.role === 'god') {
+        adminView.classList.remove('hidden');
+        userView.classList.add('hidden');
+        loadAllShipments();
+    } else {
+        adminView.classList.add('hidden');
+        userView.classList.remove('hidden');
+        loadUserShipments();
+    }
+}
+
+function loadAllShipments() {
+    const tbody = document.getElementById('shipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter out shipments delivered more than 10 days ago
+    const activeShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return !isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Populate carrier filter
+    populateCarrierFilter('filterVettore');
+
+    if (activeShipments.length === 0) {
+        document.getElementById('noShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    activeShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    activeShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        
+        // Add yellow highlighting for stuck shipments
+        if (isShipmentStuckTooLong(shipment)) {
+            row.classList.add('stuck-shipment');
+        }
+        
+        // Add green highlighting for delivered shipments
+        if (shipment.stato === 'Consegnato' && shipment.dataConsegna) {
+            row.classList.add('delivered-shipment');
+        }
+        
+        // Add blue highlighting for clicked shipment (admin only)
+        if (clickedShipmentId === shipment.id) {
+            row.classList.add('clicked-shipment');
+        }
+        
+        // For GOD users, show client name like regular users
+        const showClientName = currentUser.role === 'god';
+        
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            ${showClientName ? `<td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>` : ''}
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" onclick="markClickedShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800 mr-2" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.ultimoMagazzino}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" onclick="markClickedShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800 mr-2" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function loadUserShipments() {
+    const tbody = document.getElementById('userShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const userNumber = currentUser.userNumber;
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments by user's clients and exclude delivered >10 days
+    const userShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const isDeliveredOld = isDeliveredMoreThan10Days(shipment);
+        
+        // Log for debugging user shipment visibility
+        console.log('Filtering shipment:', shipment.nrDDT, 'Client:', shipment.codiceCliente, 'ClientData:', clientData, 'CurrentUserNumber:', userNumber, 'IsDeliveredOld:', isDeliveredOld);
+        
+        // Check if client exists and matches user number
+        if (!clientData) {
+            console.log('Skipping shipment - client not found in clienti map:', shipment.codiceCliente);
+            return false;
+        }
+        
+        return clientData.userNumber === userNumber && !isDeliveredOld;
+    });
+
+    // Populate carrier filter
+    populateCarrierFilter('filterVettoreUser');
+
+    if (userShipments.length === 0) {
+        document.getElementById('noUserShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noUserShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    userShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    userShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? clientData.nome : shipment.codiceCliente;
+        
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        
+        // Add yellow highlighting for stuck shipments
+        if (isShipmentStuckTooLong(shipment)) {
+            row.classList.add('stuck-shipment');
+        }
+        
+        // Add green highlighting for delivered shipments
+        if (shipment.stato === 'Consegnato') {
+            row.classList.add('delivered-shipment');
+        }
+        
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                ${shipment.ddtFile ? `<button onclick="viewDDT('${shipment.id}')" class="text-green-600 hover:text-green-800" title="Visualizza DDT"><i class="fas fa-file-pdf"></i></button>` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function isDeliveredMoreThan10Days(shipment) {
+    if (shipment.stato !== 'Consegnato' || !shipment.dataConsegna) {
+        return false;
+    }
+
+    const deliveryDate = new Date(shipment.dataConsegna);
+    const today = new Date();
+    const diffTime = Math.abs(today - deliveryDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    return diffDays > 10;
+}
+
+function isShipmentStuckTooLong(shipment) {
+    // Check if shipment is in "Preparato" or "In magazzino" state
+    if (shipment.stato !== 'Preparato' && shipment.stato !== 'In magazzino') {
+        return false;
+    }
+
+    // Check if state and warehouse haven't changed (using tracking history if available)
+    // For now, check if it's been stuck for more than 1 day
+    const preparationDate = new Date(shipment.dataPreparazioneMerce);
+    const today = new Date();
+    const diffTime = Math.abs(today - preparationDate);
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    // Check if state and warehouse are the same (no recent updates)
+    // If there's a lastUpdateDate, use that instead of preparation date
+    const checkDate = shipment.lastUpdateDate ? new Date(shipment.lastUpdateDate) : preparationDate;
+    const diffTimeCheck = Math.abs(today - checkDate);
+    const diffDaysCheck = Math.ceil(diffTimeCheck / (1000 * 60 * 60 * 24));
+
+    return diffDaysCheck > 1;
+}
+
+function loadDeliveredShipments() {
+    const tbody = document.getElementById('deliveredShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments delivered more than 10 days ago
+    const deliveredShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Populate carrier filter
+    populateCarrierFilter('filterVettoreDelivered');
+
+    if (deliveredShipments.length === 0) {
+        document.getElementById('noDeliveredShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noDeliveredShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    deliveredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    deliveredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider user-only">${clientName}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile admin-only">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.dataConsegna}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden admin-only">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function filterDeliveredShipments() {
+    const searchTerm = document.getElementById('searchDeliveredShipments').value.toLowerCase();
+    const vettoreFilter = document.getElementById('filterVettoreDelivered').value;
+    const dataDaFilter = document.getElementById('filterDataDaDelivered').value;
+    const dataAFilter = document.getElementById('filterDataADelivered').value;
+
+    const tbody = document.getElementById('deliveredShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments delivered more than 10 days ago
+    const deliveredShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Apply filters
+    const filteredShipments = deliveredShipments.filter(id => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+
+        // Search filter
+        const matchesSearch = !searchTerm ||
+            shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            clientName.toLowerCase().includes(searchTerm) ||
+            shipment.vettore.toLowerCase().includes(searchTerm);
+
+        // Carrier filter
+        const matchesVettore = !vettoreFilter || shipment.vettore === vettoreFilter;
+
+        // Date filter (from)
+        let matchesDataDa = true;
+        if (dataDaFilter && shipment.dataConsegna) {
+            matchesDataDa = new Date(shipment.dataConsegna) >= new Date(dataDaFilter);
+        }
+
+        // Date filter (to)
+        let matchesDataA = true;
+        if (dataAFilter && shipment.dataConsegna) {
+            matchesDataA = new Date(shipment.dataConsegna) <= new Date(dataAFilter);
+        }
+
+        return matchesSearch && matchesVettore && matchesDataDa && matchesDataA;
+    });
+
+    if (filteredShipments.length === 0) {
+        document.getElementById('noDeliveredShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noDeliveredShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    filteredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    filteredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider user-only">${clientName}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile admin-only">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.dataConsegna}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden admin-only">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function populateCarrierFilter(filterId) {
+    const filter = document.getElementById(filterId);
+    if (!filter) return;
+
+    // Get unique carriers from shipments
+    const uniqueCarriers = [...new Set(Object.values(spedizioni).map(s => s.vettore).filter(v => v))];
+
+    // Save current selection
+    const currentValue = filter.value;
+
+    // Clear options except first
+    filter.innerHTML = '<option value="">Tutti</option>';
+
+    // Add carrier options
+    uniqueCarriers.forEach(carrier => {
+        const option = document.createElement('option');
+        option.value = carrier;
+        option.textContent = carrier;
+        filter.appendChild(option);
+    });
+
+    // Restore selection if still valid
+    if (uniqueCarriers.includes(currentValue)) {
+        filter.value = currentValue;
+    }
+}
+
+function filterShipments() {
+    const searchTerm = document.getElementById('searchShipments').value.toLowerCase();
+    const statoFilter = document.getElementById('filterStato').value;
+    const vettoreFilter = document.getElementById('filterVettore').value;
+    const dataDaFilter = document.getElementById('filterDataDa').value;
+
+    const tbody = document.getElementById('shipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter out shipments delivered more than 10 days ago
+    const activeShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        return !isDeliveredMoreThan10Days(shipment);
+    });
+
+    // Apply filters
+    const filteredShipments = activeShipments.filter(id => {
+        const shipment = spedizioni[id];
+
+        // Search filter
+        const matchesSearch = !searchTerm ||
+            shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            shipment.codiceCliente.toLowerCase().includes(searchTerm) ||
+            shipment.vettore.toLowerCase().includes(searchTerm);
+
+        // Status filter
+        const matchesStato = !statoFilter || shipment.stato === statoFilter;
+
+        // Carrier filter
+        const matchesVettore = !vettoreFilter || shipment.vettore === vettoreFilter;
+
+        // Date filter
+        let matchesData = true;
+        if (dataDaFilter && shipment.dataPreparazioneMerce) {
+            matchesData = new Date(shipment.dataPreparazioneMerce) >= new Date(dataDaFilter);
+        }
+
+        return matchesSearch && matchesStato && matchesVettore && matchesData;
+    });
+
+    if (filteredShipments.length === 0) {
+        document.getElementById('noShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    filteredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    filteredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const clientData = clienti[shipment.codiceCliente];
+        const clientName = clientData ? (typeof clientData === 'object' ? clientData.nome : '') : shipment.codiceCliente;
+        
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        
+        // For GOD users, show client name like regular users
+        const showClientName = currentUser.role === 'god';
+        
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            ${showClientName ? `<td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${clientName}</td>` : ''}
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.ultimoMagazzino}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${currentUser.role !== 'god' ? `
+                <button onclick="editShipment('${shipment.id}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteShipment('${shipment.id}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+                ` : ''}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function filterUserShipments() {
+    const searchTerm = document.getElementById('searchShipmentsUser').value.toLowerCase();
+    const statoFilter = document.getElementById('filterStatoUser').value;
+    const vettoreFilter = document.getElementById('filterVettoreUser').value;
+    const dataDaFilter = document.getElementById('filterDataDaUser').value;
+
+    const tbody = document.getElementById('userShipmentsTableBody');
+    tbody.innerHTML = '';
+
+    const userNumber = currentUser.userNumber;
+    const shipmentIds = Object.keys(spedizioni);
+
+    // Filter shipments by user's clients and exclude delivered >10 days
+    const userShipments = shipmentIds.filter(id => {
+        const shipment = spedizioni[id];
+        const clientUserNumber = clienti[shipment.codiceCliente];
+        const isDeliveredOld = isDeliveredMoreThan10Days(shipment);
+        return clientUserNumber === userNumber && !isDeliveredOld;
+    });
+
+    // Apply filters
+    const filteredShipments = userShipments.filter(id => {
+        const shipment = spedizioni[id];
+
+        // Search filter
+        const matchesSearch = !searchTerm ||
+            shipment.nrDDT.toLowerCase().includes(searchTerm) ||
+            shipment.codiceCliente.toLowerCase().includes(searchTerm) ||
+            shipment.vettore.toLowerCase().includes(searchTerm);
+
+        // Status filter
+        const matchesStato = !statoFilter || shipment.stato === statoFilter;
+
+        // Carrier filter
+        const matchesVettore = !vettoreFilter || shipment.vettore === vettoreFilter;
+
+        // Date filter
+        let matchesData = true;
+        if (dataDaFilter && shipment.dataPreparazioneMerce) {
+            matchesData = new Date(shipment.dataPreparazioneMerce) >= new Date(dataDaFilter);
+        }
+
+        return matchesSearch && matchesStato && matchesVettore && matchesData;
+    });
+
+    if (filteredShipments.length === 0) {
+        document.getElementById('noUserShipments').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noUserShipments').classList.add('hidden');
+
+    // Sort shipments by DDT descending (largest first)
+    filteredShipments.sort((a, b) => {
+        const ddtA = parseInt(spedizioni[a].nrDDT) || 0;
+        const ddtB = parseInt(spedizioni[b].nrDDT) || 0;
+        return ddtB - ddtA;
+    });
+
+    filteredShipments.forEach((id, index) => {
+        const shipment = spedizioni[id];
+        const row = document.createElement('tr');
+        row.className = index % 2 === 0 ? 'bg-white' : 'bg-gray-100';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${shipment.nrDDT}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.vettore}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataPreparazioneMerce}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.stato}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.ultimoMagazzino}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.dataConsegna || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">${shipment.note || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider hide-mobile">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+            <!-- Mobile-only columns -->
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">${shipment.ultimoMagazzino}</td>
+            <td class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider md:hidden">
+                ${shipment.linkTracking ? `
+                    <a href="${shipment.linkTracking}" target="_blank" class="text-blue-600 hover:text-blue-800 mr-2"><i class="fas fa-external-link-alt"></i></a>
+                    <button onclick="shareTracking('${shipment.linkTracking}')" class="text-purple-600 hover:text-purple-800" title="Condividi tracking"><i class="fas fa-share-alt"></i></button>
+                ` : '-'}
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function addNewShipment() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    const title = document.getElementById('rateModalTitle');
+
+    // Set modal title
+    title.textContent = 'Aggiungi Nuova Spedizione';
+
+    // Get available carriers
+    const carrierOptions = Object.keys(vettori).map(nome =>
+        `<option value="${nome}">${nome}</option>`
+    ).join('');
+
+    content.innerHTML = `
+        <form id="newShipmentForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuova Spedizione</h4>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Codice Cliente</label>
+                    <input type="text" id="newShipmentCodiceCliente" required class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" placeholder="Codice cliente (es. 1001)" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nr. DDT</label>
+                    <input type="text" id="newShipmentNrDDT" required class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" placeholder="Nr. DDT" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Vettore</label>
+                    <select id="newShipmentVettore" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="">Seleziona vettore</option>
+                        ${carrierOptions}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Preparazione Merce</label>
+                    <input type="date" id="newShipmentDataPreparazione" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Magazzino</label>
+                    <input type="text" id="newShipmentMagazzino" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" placeholder="Magazzino" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
+                    <input type="text" id="newShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="https://... (per TNT inserisci solo il riferimento)">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Stato</label>
+                    <select id="newShipmentStato" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="Preparato">Preparato</option>
+                        <option value="In magazzino">In magazzino</option>
+                        <option value="Prenotato">Prenotato</option>
+                        <option value="In consegna">In consegna</option>
+                        <option value="Consegnato">Consegnato</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Consegna</label>
+                    <input type="date" id="newShipmentDataConsegna" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Note</label>
+                    <textarea id="newShipmentNote" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" rows="3" placeholder="Note aggiuntive" style="text-transform: uppercase;"></textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">File DDT (PDF)</label>
+                    <input type="file" id="newShipmentDDTFile" accept=".pdf" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <p class="text-xs text-gray-500 mt-1">Carica il file PDF del DDT (opzionale)</p>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Spedizione
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('newShipmentForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewShipment();
+    });
+}
+
+async function saveNewShipment() {
+    const codiceCliente = document.getElementById('newShipmentCodiceCliente').value;
+    const nrDDT = document.getElementById('newShipmentNrDDT').value;
+    const vettore = document.getElementById('newShipmentVettore').value;
+    const dataPreparazioneMerce = document.getElementById('newShipmentDataPreparazione').value;
+    const magazzino = document.getElementById('newShipmentMagazzino').value;
+    let linkTracking = document.getElementById('newShipmentLinkTracking').value;
+    const stato = document.getElementById('newShipmentStato').value;
+    const dataConsegna = document.getElementById('newShipmentDataConsegna').value;
+    const note = document.getElementById('newShipmentNote').value;
+    const ddtFile = document.getElementById('newShipmentDDTFile').files[0];
+
+    // Auto-complete TNT tracking link
+    if (vettore === 'TNT' && linkTracking && !linkTracking.startsWith('http')) {
+        linkTracking = 'https://www.tnt.it/tracking/getTrack.html?wt=1&consigNos=' + linkTracking;
+    }
+
+    // Check if DDT number already exists
+    const existingShipment = Object.values(spedizioni).find(s => s.nrDDT === nrDDT);
+    if (existingShipment) {
+        showNotification('Errore: Il numero DDT è già presente in elenco', 'error');
+        return;
+    }
+
+    // Check if client code exists in clienti
+    const clientExists = clienti[codiceCliente] !== undefined;
+    if (!clientExists) {
+        showNotification('Attenzione: Il codice cliente ' + codiceCliente + ' non è presente nell\'elenco clienti. La spedizione verrà salvata ma potrebbe non essere visibile agli utenti. Carica un CSV aggiornato nella sezione gestione clienti.', 'warning');
+    }
+
+    // Check DDT continuity
+    checkDDTContinuity(nrDDT);
+
+    let ddtBase64 = '';
+    if (ddtFile) {
+        ddtBase64 = await readFileAsBase64(ddtFile);
+    }
+
+    // Generate unique shipment ID
+    const shipmentId = 'SP' + Date.now().toString().slice(-6);
+
+    spedizioni[shipmentId] = {
+        id: shipmentId,
+        nrDDT: nrDDT,
+        codiceCliente: codiceCliente,
+        vettore: vettore,
+        dataPreparazioneMerce: dataPreparazioneMerce,
+        stato: stato,
+        ultimoMagazzino: magazzino,
+        dataConsegna: dataConsegna,
+        linkTracking: linkTracking,
+        note: note,
+        ddtFile: ddtBase64
+    };
+
+    // Save only the new shipment to Firestore (not all shipments)
+    try {
+        await db.collection('shipments').doc(shipmentId).set(spedizioni[shipmentId]);
+        console.log('New shipment saved to Firestore:', shipmentId);
+    } catch (error) {
+        console.error('Error saving new shipment to Firestore:', error);
+        showNotification('Errore nel salvataggio su Firestore: ' + error.message, 'error');
+        return;
+    }
+
+    // Don't save shipments to localStorage anymore (quota exceeded)
+    // Firestore is now the primary storage for shipments
+    
+    closeRateModal();
+    loadAllShipments();
+    showNotification('Spedizione aggiunta con successo!', 'success');
+}
+
+function readFileAsBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+function editShipment(id) {
+    const shipment = spedizioni[id];
+    if (!shipment) return;
+
+    // Check if user is admin for delivered shipments >10 days
+    if (isDeliveredMoreThan10Days(shipment)) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('Solo gli amministratori possono modificare spedizioni consegnate da più di 10 giorni', 'error');
+            return;
+        }
+    }
+
+    // Check if user is GOD (read-only)
+    if (currentUser.role === 'god') {
+        showNotification('Gli utenti GOD non possono modificare le spedizioni', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    const title = document.getElementById('rateModalTitle');
+
+    // Set modal title
+    title.textContent = 'Modifica Spedizione ' + id;
+
+    content.innerHTML = `
+        <form id="editShipmentForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Modifica Spedizione ${id}</h4>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Codice Cliente</label>
+                    <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.codiceCliente}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nr. DDT</label>
+                    <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.nrDDT}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Vettore</label>
+                    <input type="text" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.vettore}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Preparazione Merce</label>
+                    <input type="date" class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100" value="${shipment.dataPreparazioneMerce}" readonly>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Magazzino</label>
+                    <input type="text" id="editShipmentMagazzino" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" value="${shipment.ultimoMagazzino}" style="text-transform: uppercase;">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Stato</label>
+                    <select id="editShipmentStato" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                        <option value="Preparato" ${shipment.stato === 'Preparato' ? 'selected' : ''}>Preparato</option>
+                        <option value="In magazzino" ${shipment.stato === 'In magazzino' ? 'selected' : ''}>In magazzino</option>
+                        <option value="Prenotato" ${shipment.stato === 'Prenotato' ? 'selected' : ''}>Prenotato</option>
+                        <option value="In consegna" ${shipment.stato === 'In consegna' ? 'selected' : ''}>In consegna</option>
+                        <option value="Consegnato" ${shipment.stato === 'Consegnato' ? 'selected' : ''}>Consegnato</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Data Consegna</label>
+                    <input type="date" id="editShipmentDataConsegna" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.dataConsegna || ''}">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Link Tracking</label>
+                    <input type="text" id="editShipmentLinkTracking" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${shipment.linkTracking || ''}" placeholder="https://... (per TNT inserisci solo il riferimento)">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Note</label>
+                    <textarea id="editShipmentNote" class="w-full px-4 py-2 border border-gray-300 rounded-lg uppercase" rows="3" style="text-transform: uppercase;">${shipment.note || ''}</textarea>
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">File DDT (PDF)</label>
+                    <input type="file" id="editShipmentDDTFile" accept=".pdf" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                    <p class="text-xs text-gray-500 mt-1">Carica il file PDF del DDT (opzionale). Lascia vuoto per mantenere il file esistente.</p>
+                    ${shipment.ddtFile ? '<p class="text-xs text-green-600 mt-1">File DDT attuale presente</p>' : ''}
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva Modifiche
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('editShipmentForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveShipmentEdit(id);
+    });
+}
+
+async function saveShipmentEdit(id) {
+    const ddtFile = document.getElementById('editShipmentDDTFile').files[0];
+    let ddtBase64 = spedizioni[id].ddtFile || ''; // Keep existing file if no new file selected
+    
+    if (ddtFile) {
+        ddtBase64 = await readFileAsBase64(ddtFile);
+    }
+    
+    const oldStato = spedizioni[id].stato;
+    const oldMagazzino = spedizioni[id].ultimoMagazzino;
+    const newStato = document.getElementById('editShipmentStato').value;
+    const newMagazzino = document.getElementById('editShipmentMagazzino').value;
+    let linkTracking = document.getElementById('editShipmentLinkTracking').value;
+    const newDataConsegna = document.getElementById('editShipmentDataConsegna').value;
+    
+    // Auto-complete TNT tracking link
+    if (spedizioni[id].vettore === 'TNT' && linkTracking && !linkTracking.startsWith('http')) {
+        linkTracking = 'https://www.tnt.it/tracking/getTrack.html?wt=1&consigNos=' + linkTracking;
+    }
+    
+    // Create temporary shipment object to check if it will be delivered >10 days
+    const tempShipment = {
+        ...spedizioni[id],
+        stato: newStato,
+        dataConsegna: newDataConsegna
+    };
+    
+    // Remove PDF when shipment moves to delivered >10 days (historical) to save Firestore space
+    const wasNotHistorical = !isDeliveredMoreThan10Days(spedizioni[id]);
+    const willBeHistorical = isDeliveredMoreThan10Days(tempShipment);
+    
+    if (wasNotHistorical && willBeHistorical && ddtBase64) {
+        console.log('Removing PDF for shipment moving to historical (delivered >10 days):', id);
+        ddtBase64 = '';
+    }
+    
+    spedizioni[id] = {
+        id: id,
+        nrDDT: spedizioni[id].nrDDT,
+        codiceCliente: spedizioni[id].codiceCliente,
+        vettore: spedizioni[id].vettore,
+        dataPreparazioneMerce: spedizioni[id].dataPreparazioneMerce,
+        stato: newStato,
+        ultimoMagazzino: newMagazzino,
+        dataConsegna: newDataConsegna,
+        linkTracking: linkTracking,
+        note: document.getElementById('editShipmentNote').value,
+        ddtFile: ddtBase64,
+        lastUpdateDate: new Date().toISOString().split('T')[0] // Update last update date
+    };
+
+    // Save only the modified shipment to Firestore (not all shipments)
+    try {
+        await db.collection('shipments').doc(id).set(spedizioni[id]);
+        console.log('Modified shipment saved to Firestore:', id);
+        if (wasNotHistorical && willBeHistorical) {
+            console.log('PDF removed from historical shipment (delivered >10 days) to save space');
+        }
+    } catch (error) {
+        console.error('Error saving modified shipment to Firestore:', error);
+        showNotification('Errore nel salvataggio su Firestore: ' + error.message, 'error');
+        return;
+    }
+
+    // Don't save shipments to localStorage anymore (quota exceeded)
+    // Firestore is now the primary storage for shipments
+    
+    closeRateModal();
+    loadAllShipments();
+    showNotification('Spedizione modificata con successo!', 'success');
+}
+
+async function deleteShipment(id) {
+    const shipment = spedizioni[id];
+    if (!shipment) return;
+
+    // Check if user is admin for delivered shipments >10 days
+    if (isDeliveredMoreThan10Days(shipment)) {
+        if (!currentUser || currentUser.role !== 'admin') {
+            showNotification('Solo gli amministratori possono eliminare spedizioni consegnate da più di 10 giorni', 'error');
+            return;
+        }
+    }
+
+    // Check if user is GOD (read-only)
+    if (currentUser.role === 'god') {
+        showNotification('Gli utenti GOD non possono eliminare le spedizioni', 'error');
+        return;
+    }
+
+    if (confirm(`Sei sicuro di voler eliminare la spedizione ${id}?`)) {
+        try {
+            // Delete from Firestore
+            await db.collection('shipments').doc(id).delete();
+            console.log('Shipment deleted from Firestore:', id);
+            
+            // Delete from local object
+            delete spedizioni[id];
+            
+            // Don't save shipments to localStorage anymore (quota exceeded)
+            // Firestore is now the primary storage for shipments
+            
+            loadAllShipments();
+            showNotification('Spedizione eliminata con successo!', 'success');
+            
+            // Re-check DDT continuity after deletion
+            setTimeout(() => {
+                const activeShipments = Object.keys(spedizioni).filter(id => {
+                    const shipment = spedizioni[id];
+                    return !isDeliveredMoreThan10Days(shipment);
+                });
+                if (activeShipments.length > 0) {
+                    const highestDDT = activeShipments.reduce((max, id) => {
+                        const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+                        return ddt > max ? ddt : max;
+                    }, 0);
+                    checkDDTContinuity(highestDDT);
+                }
+            }, 100);
+        } catch (error) {
+            console.error('Error deleting shipment from Firestore:', error);
+            showNotification('Errore durante l\'eliminazione della spedizione', 'error');
+        }
+    }
+}
+
+function viewDDT(id) {
+    const shipment = spedizioni[id];
+    if (!shipment || !shipment.ddtFile) {
+        showNotification('File DDT non disponibile', 'error');
+        return;
+    }
+
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">DDT - ${shipment.nrDDT}</h4>
+                <p class="text-sm text-gray-600 mt-2">Codice Cliente: ${shipment.codiceCliente}</p>
+            </div>
+
+            <div class="w-full h-96 border border-gray-300 rounded-lg overflow-hidden">
+                <iframe src="${shipment.ddtFile}" class="w-full h-full" frameborder="0"></iframe>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Chiudi
+                </button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function cleanupOldDDTFiles() {
+    let cleanedCount = 0;
+    Object.keys(spedizioni).forEach(id => {
+        const shipment = spedizioni[id];
+        if (shipment.ddtFile && isDeliveredMoreThan10Days(shipment)) {
+            delete shipment.ddtFile;
+            cleanedCount++;
+        }
+    });
+
+    if (cleanedCount > 0) {
+        saveShipments();
+    }
+}
+
+function shareTracking(link) {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Condividi Link Tracking</h4>
+                <p class="text-sm text-gray-600 mt-2">Scegli come condividere il link</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <button onclick="shareViaWhatsApp('${link}')" class="flex items-center justify-center space-x-2 bg-green-500 text-white px-4 py-3 rounded-lg hover:bg-green-600 transition">
+                    <i class="fab fa-whatsapp text-xl"></i>
+                    <span>WhatsApp</span>
+                </button>
+                <button onclick="shareViaEmail('${link}')" class="flex items-center justify-center space-x-2 bg-blue-500 text-white px-4 py-3 rounded-lg hover:bg-blue-600 transition">
+                    <i class="fas fa-envelope text-xl"></i>
+                    <span>Email</span>
+                </button>
+                <button onclick="shareViaTelegram('${link}')" class="flex items-center justify-center space-x-2 bg-blue-400 text-white px-4 py-3 rounded-lg hover:bg-blue-500 transition">
+                    <i class="fab fa-telegram text-xl"></i>
+                    <span>Telegram</span>
+                </button>
+                <button onclick="copyLink('${link}')" class="flex items-center justify-center space-x-2 bg-gray-500 text-white px-4 py-3 rounded-lg hover:bg-gray-600 transition">
+                    <i class="fas fa-copy text-xl"></i>
+                    <span>Copia Link</span>
+                </button>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Chiudi
+                </button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function shareViaWhatsApp(link) {
+    const text = `Ecco il link di tracking della spedizione: ${link}`;
+    const whatsappUrl = `https://wa.me/?text=${encodeURIComponent(text)}`;
+    window.open(whatsappUrl, '_blank');
+}
+
+function shareViaEmail(link) {
+    const subject = 'Tracking Spedizione';
+    const body = `Ecco il link di tracking della spedizione: ${link}`;
+    const mailtoUrl = `mailto:?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailtoUrl;
+}
+
+function shareViaTelegram(link) {
+    const text = `Ecco il link di tracking della spedizione: ${link}`;
+    const telegramUrl = `https://t.me/share/url?url=${encodeURIComponent(link)}&text=${encodeURIComponent(text)}`;
+    window.open(telegramUrl, '_blank');
+}
+
+function copyLink(link) {
+    navigator.clipboard.writeText(link).then(() => {
+        showNotification('Link copiato negli appunti!', 'success');
+        closeRateModal();
+    }).catch(() => {
+        showNotification('Errore nella copia del link', 'error');
+    });
+}
+
+function uploadClientsCSV() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <div class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Carica CSV Clienti</h4>
+                <p class="text-sm text-gray-600 mt-2">Il file CSV deve avere il formato: codice_cliente,codice_utente,nome_cliente</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700 mb-2">Seleziona file CSV</label>
+                <input type="file" id="clientsCSVFile" accept=".csv" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+            </div>
+
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p class="text-sm text-blue-800 font-semibold mb-2">Formato CSV:</p>
+                <p class="text-sm text-blue-700">codice_cliente,codice_utente,nome_cliente</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1001,1,Mario Rossi</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1002,1,Luigi Bianchi</p>
+                <p class="text-sm text-blue-700 mt-1">Esempio: 1003,2,Giuseppe Verdi</p>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="button" onclick="processClientsCSV()" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-upload mr-2"></i> Carica CSV
+                </button>
+            </div>
+        </div>
+    `;
+
+    modal.classList.remove('hidden');
+}
+
+function processClientsCSV() {
+    const fileInput = document.getElementById('clientsCSVFile');
+    const file = fileInput.files[0];
+
+    if (!file) {
+        showNotification('Seleziona un file CSV', 'error');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split('\n');
+        
+        console.log('Total lines in CSV:', lines.length);
+
+        let successCount = 0;
+        let errorCount = 0;
+
+        lines.forEach((line, index) => {
+            if (index === 0 && line.toLowerCase().includes('codice')) {
+                // Skip header if present
+                return;
+            }
+
+            // Skip empty lines
+            if (!line.trim()) {
+                return;
+            }
+
+            // Detect separator (try ; first, then ,)
+            const separator = line.includes(';') ? ';' : ',';
+            const parts = line.split(separator);
+
+            if (parts.length >= 3) {
+                const codiceCliente = parts[0].trim();
+                const codiceUtente = parseInt(parts[1].trim());
+                const nomeCliente = parts[2].trim();
+
+                if (codiceCliente && !isNaN(codiceUtente)) {
+                    clienti[codiceCliente] = {
+                        userNumber: codiceUtente,
+                        nome: nomeCliente
+                    };
+                    successCount++;
+                } else {
+                    errorCount++;
+                    console.log('Error processing line', index, ':', line);
+                }
+            } else {
+                errorCount++;
+                console.log('Invalid line format at index', index, ':', line);
+            }
+        });
+
+        console.log('CSV processing complete. Success:', successCount, 'Errors:', errorCount);
+        console.log('Total clients in memory after processing:', Object.keys(clienti).length);
+
+        saveClients();
+        closeRateModal();
+        loadClientsTable();
+        showNotification(`CSV caricato: ${successCount} clienti aggiunti, ${errorCount} errori`, successCount > 0 ? 'success' : 'warning');
+    };
+
+    reader.readAsText(file);
+}
+
+function loadClientsTable() {
+    const tbody = document.getElementById('clientsTableBody');
+    tbody.innerHTML = '';
+
+    const clientCodes = Object.keys(clienti);
+    console.log('Total clients in database:', clientCodes.length);
+
+    if (clientCodes.length === 0) {
+        document.getElementById('noClients').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noClients').classList.add('hidden');
+
+    let renderedCount = 0;
+    clientCodes.forEach(codiceCliente => {
+        const clientData = clienti[codiceCliente];
+        const codiceUtente = typeof clientData === 'object' ? clientData.userNumber : clientData;
+        const nomeCliente = typeof clientData === 'object' ? clientData.nome : '';
+        
+        const row = document.createElement('tr');
+        row.className = 'editable-rate';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${codiceCliente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${codiceUtente}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${nomeCliente}</td>
+        `;
+        tbody.appendChild(row);
+        renderedCount++;
+    });
+    
+    console.log('Clients rendered in table:', renderedCount);
+}
+
+function loadCarriersTable() {
+    const tbody = document.getElementById('carriersTableBody');
+    tbody.innerHTML = '';
+
+    const carrierNames = Object.keys(vettori);
+
+    if (carrierNames.length === 0) {
+        document.getElementById('noCarriers').classList.remove('hidden');
+        return;
+    }
+
+    document.getElementById('noCarriers').classList.add('hidden');
+
+    carrierNames.forEach(nome => {
+        const carrier = vettori[nome];
+        const row = document.createElement('tr');
+        row.className = 'editable-rate';
+        row.innerHTML = `
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${carrier.nome}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${carrier.apiKey ? '***' + carrier.apiKey.slice(-4) : '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${carrier.apiUrl || '-'}</td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <span class="${carrier.attivo ? 'text-green-600' : 'text-red-600'}">${carrier.attivo ? 'Sì' : 'No'}</span>
+            </td>
+            <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <button onclick="editCarrier('${nome}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Modifica">
+                    <i class="fas fa-edit"></i>
+                </button>
+                <button onclick="deleteCarrier('${nome}')" class="text-red-600 hover:text-red-800" title="Elimina">
+                    <i class="fas fa-trash"></i>
+                </button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+    
+    // Check DDT continuity when loading shipments
+    if (activeShipments.length > 0) {
+        const highestDDT = activeShipments.reduce((max, id) => {
+            const ddt = extractBaseDDT(spedizioni[id].nrDDT);
+            return ddt > max ? ddt : max;
+        }, 0);
+        checkDDTContinuity(highestDDT);
+    }
+}
+
+function addNewCarrier() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <form id="newCarrierForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuovo Vettore</h4>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Vettore</label>
+                    <input type="text" id="newCarrierNome" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. Bartolini">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API Key</label>
+                    <input type="text" id="newCarrierApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Chiave API (opzionale)">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API URL</label>
+                    <input type="url" id="newCarrierApiUrl" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="URL API (opzionale)">
+                </div>
+                <div>
+                    <label class="flex items-center">
+                        <input type="checkbox" id="newCarrierAttivo" checked class="mr-2">
+                        <span class="text-sm font-medium text-gray-700">Attivo</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Vettore
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('newCarrierForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewCarrier();
+    });
+}
+
+function saveNewCarrier() {
+    const nome = document.getElementById('newCarrierNome').value;
+    const apiKey = document.getElementById('newCarrierApiKey').value;
+    const apiUrl = document.getElementById('newCarrierApiUrl').value;
+    const attivo = document.getElementById('newCarrierAttivo').checked;
+
+    vettori[nome] = {
+        nome: nome,
+        apiKey: apiKey,
+        apiUrl: apiUrl,
+        attivo: attivo
+    };
+
+    saveCarriers();
+    closeRateModal();
+    loadCarriersTable();
+    showNotification('Vettore aggiunto con successo!', 'success');
+}
+
+function editCarrier(nome) {
+    const carrier = vettori[nome];
+    if (!carrier) return;
+
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+
+    content.innerHTML = `
+        <form id="editCarrierForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Modifica Vettore ${nome}</h4>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Vettore</label>
+                    <input type="text" id="editCarrierNome" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${carrier.nome}">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API Key</label>
+                    <input type="text" id="editCarrierApiKey" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${carrier.apiKey || ''}">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">API URL</label>
+                    <input type="url" id="editCarrierApiUrl" class="w-full px-4 py-2 border border-gray-300 rounded-lg" value="${carrier.apiUrl || ''}">
+                </div>
+                <div>
+                    <label class="flex items-center">
+                        <input type="checkbox" id="editCarrierAttivo" ${carrier.attivo ? 'checked' : ''} class="mr-2">
+                        <span class="text-sm font-medium text-gray-700">Attivo</span>
+                    </label>
+                </div>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva Modifiche
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('editCarrierForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveCarrierEdit(nome);
+    });
+}
+
+function saveCarrierEdit(oldNome) {
+    const nome = document.getElementById('editCarrierNome').value;
+    const apiKey = document.getElementById('editCarrierApiKey').value;
+    const apiUrl = document.getElementById('editCarrierApiUrl').value;
+    const attivo = document.getElementById('editCarrierAttivo').checked;
+
+    // Remove old entry if name changed
+    if (oldNome !== nome) {
+        delete vettori[oldNome];
+    }
+
+    vettori[nome] = {
+        nome: nome,
+        apiKey: apiKey,
+        apiUrl: apiUrl,
+        attivo: attivo
+    };
+
+    saveCarriers();
+    closeRateModal();
+    loadCarriersTable();
+    showNotification('Vettore modificato con successo!', 'success');
+}
+
+function deleteCarrier(nome) {
+    if (confirm(`Sei sicuro di voler eliminare il vettore ${nome}?`)) {
+        delete vettori[nome];
+        saveCarriers();
+        loadCarriersTable();
+        showNotification('Vettore eliminato con successo!', 'success');
+    }
+}
+
+// Auto-update tracking every 10 minutes if API keys are available
+let autoUpdateInterval = null;
+
+function startAutoUpdateTracking() {
+    // Clear existing interval if any
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+    }
+
+    // Check if there are active carriers with API keys
+    const hasActiveCarriersWithAPI = Object.values(vettori).some(carrier =>
+        carrier.attivo && carrier.apiKey && carrier.apiUrl
+    );
+
+    if (!hasActiveCarriersWithAPI) {
+        console.log('Nessun vettore attivo con API configurata. Aggiornamento automatico disabilitato.');
+        return;
+    }
+
+    // Update immediately
+    updateTrackingFromAPIs();
+
+    // Set interval for every 10 minutes (600000 ms)
+    autoUpdateInterval = setInterval(updateTrackingFromAPIs, 600000);
+    console.log('Aggiornamento automatico tracking attivato (ogni 10 minuti)');
+}
+
+function updateTrackingFromAPIs() {
+    console.log('Aggiornamento tracking dalle API...');
+
+    // For each shipment with a carrier that has API configured
+    Object.keys(spedizioni).forEach(shipmentId => {
+        const shipment = spedizioni[shipmentId];
+        const carrier = vettori[shipment.vettore];
+
+        if (carrier && carrier.attivo && carrier.apiKey && carrier.apiUrl) {
+            // In a real implementation, this would make an API call to the carrier
+            // For now, we'll log that the update would happen
+            console.log(`Aggiornamento spedizione ${shipmentId} tramite API ${carrier.nome}`);
+            // TODO: Implement actual API calls to carrier endpoints
+            // This would require specific implementation for each carrier's API
+        }
+    });
+}
+
+function stopAutoUpdateTracking() {
+    if (autoUpdateInterval) {
+        clearInterval(autoUpdateInterval);
+        autoUpdateInterval = null;
+        console.log('Aggiornamento automatico tracking disabilitato');
+    }
+}
+
+// Default rates table - can be overridden by admin
+const defaultTariffeProvinciali = {
+    'MI': { nome: 'Milano', sigla: '', regione: 'Lombardia', costi: [6.996, 9.515, 12.342, 14.586, 14.586] },
+    'RM': { nome: 'Roma', sigla: '', regione: 'Lazio', costi: [8.206, 10.791, 13.376, 15.972, 15.972] },
+    'NA': { nome: 'Napoli', sigla: '', regione: 'Campania', costi: [10.373, 12.914, 15.444, 17.985, 17.985] },
+    'TO': { nome: 'Torino', sigla: '', regione: 'Piemonte', costi: [6.303, 8.822, 11.605, 13.893, 13.893] },
+    'GE': { nome: 'Genova', sigla: '', regione: 'Liguria', costi: [13.963, 17.989, 22.301, 25.997, 25.997] },
+    'BO': { nome: 'Bologna', sigla: '', regione: 'Emilia-Romagna', costi: [8.206, 10.791, 13.376, 15.972, 15.972] },
+    'FI': { nome: 'Firenze', sigla: '', regione: 'Toscana', costi: [8.206, 10.791, 13.376, 15.972, 15.972] },
+    'VE': { nome: 'Venezia', sigla: '', regione: 'Veneto', costi: [7.37, 10.703, 14.311, 17.402, 17.402] },
+    'BA': { nome: 'Bari', sigla: '', regione: 'Puglia', costi: [10.373, 12.914, 15.444, 17.985, 17.985] },
+    'CA': { nome: 'Cagliari', sigla: '', regione: 'Sardegna', costi: [11.473, 17.975, 24.477, 30.979, 30.979] },
+    'PA': { nome: 'Palermo', sigla: '', regione: 'Sicilia', costi: [10.373, 12.914, 15.444, 17.985, 17.985] },
+    'AN': { nome: 'Ancona', sigla: '', regione: 'Marche', costi: [20.889, 20.889, 20.889, 20.889, 20.889] },
+    'AQ': { nome: 'L\'Aquila', sigla: '', regione: 'Abruzzo', costi: [8.206, 10.791, 13.376, 15.972, 15.972] },
+    'TN': { nome: 'Trento', sigla: '', regione: 'Trentino-Alto Adige', costi: [9.361, 12.045, 14.729, 17.413, 17.413] },
+    'PZ': { nome: 'Potenza', sigla: '', regione: 'Basilicata', costi: [11.473, 17.975, 24.477, 30.979, 30.979] }
+};
+
+// Default calculation rules - can be overridden by admin
+const defaultRegoleCalcolo = {
+    'VIAGGIO ADR': { valore: '10%', unita: 'DEL NOLO' },
+    'SPONDA IDRAULICA': { valore: '15', unita: '' },
+    'PREAVVISO TEL.': { valore: '3,2', unita: '' },
+    'DIRITTO FISSO': { valore: '1,2', unita: 'A SPEDIZIONE' },
+    'ASSICURAZIONE': { valore: '0,5', unita: 'OGNI 100 KG' },
+    'FUEL ADDIZIONALE 995 e 996': { valore: '+4% +8,3%', unita: 'SUL COSTO DELLA SPEDIZIONE' },
+    'PALLET SFUSO': { valore: '32', unita: 'A PALLET' },
+    'LIGURIA E COSTIERA': { valore: '5,24€', unita: 'A QUINTALE' },
+    'FASCI': { valore: '22,5', unita: 'OGNI SEGMENTO' },
+    'PREPARAZIONE MERCE': { valore: '3,89', unita: 'FISSO' },
+    'COSTO PER RIGA': { valore: '1,20€', unita: 'A RIGA' },
+    'INCREMENTO 2026': { valore: '5%', unita: 'DEL TOTALE' }
+};
+
+// Initialize application
+document.addEventListener('DOMContentLoaded', async function() {
+    await loadAllData();
+    console.log('Data loaded, province count:', Object.keys(tariffeProvinciali).length);
+    populateProvinces();
+
+    // Wait a bit to ensure DOM is ready
+    setTimeout(() => {
+        initProvinceAutocomplete();
+        console.log('Province autocomplete initialized');
+    }, 100);
+
+    // Check if user is already logged in
+    const loggedInUser = localStorage.getItem('loggedInUser');
+    if (loggedInUser) {
+        currentUser = JSON.parse(loggedInUser);
+        updateUIForLoggedInUser();
+    }
+    // Always show calculator as main page
+    showSection('calculator');
+    
+    // File input handlers
+    const csvFileInput = document.getElementById('csvFileInput');
+    if (csvFileInput) {
+        csvFileInput.addEventListener('change', handleFileSelect);
+    }
+    
+    // Admin link handler
+    const adminLinkBtn = document.getElementById('adminLinkBtn');
+    if (adminLinkBtn) {
+        adminLinkBtn.addEventListener('click', function() {
+            showSection('admin');
+        });
+    }
+    
+    // Navigation links
+    document.querySelectorAll('nav a').forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            const section = this.getAttribute('href').substring(1);
+            showSection(section);
+        });
+    });
+    
+    // Other event listeners
+    document.getElementById('logoutBtn').addEventListener('click', logout);
+    document.getElementById('loginForm').addEventListener('submit', handleLogin);
+    
+    // Mobile menu toggle
+    const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+    const mobileMenu = document.getElementById('mobileMenu');
+    const mobileMenuOverlay = document.getElementById('mobileMenuOverlay');
+    const closeMobileMenu = document.getElementById('closeMobileMenu');
+    
+    if (mobileMenuBtn) {
+        mobileMenuBtn.addEventListener('click', function() {
+            mobileMenu.classList.remove('hidden');
+            mobileMenuOverlay.classList.remove('hidden');
+            setTimeout(() => {
+                mobileMenu.classList.add('translate-x-0');
+            }, 10);
+        });
+    }
+    
+    if (closeMobileMenu) {
+        closeMobileMenu.addEventListener('click', closeMobileMenuHandler);
+    }
+    
+    if (mobileMenuOverlay) {
+        mobileMenuOverlay.addEventListener('click', closeMobileMenuHandler);
+    }
+    
+    function closeMobileMenuHandler() {
+        mobileMenu.classList.remove('translate-x-0');
+        setTimeout(() => {
+            mobileMenu.classList.add('hidden');
+            mobileMenuOverlay.classList.add('hidden');
+        }, 300);
+    }
+    
+    // Close mobile menu when clicking on menu links
+    const mobileMenuLinks = document.querySelectorAll('.mobile-menu-link');
+    mobileMenuLinks.forEach(link => {
+        link.addEventListener('click', closeMobileMenuHandler);
+    });
+    
+    // Mobile admin link
+    const adminLinkBtnMobile = document.getElementById('adminLinkBtnMobile');
+    if (adminLinkBtnMobile) {
+        adminLinkBtnMobile.addEventListener('click', function() {
+            showSection('admin');
+            closeMobileMenuHandler();
+        });
+    }
+    
+    // Mobile logout
+    const logoutBtnMobile = document.getElementById('logoutBtnMobile');
+    if (logoutBtnMobile) {
+        logoutBtnMobile.addEventListener('click', function() {
+            logout();
+            closeMobileMenuHandler();
+        });
+    }
+    
+    // DDT Badge button
+    const ddtBadgeBtn = document.getElementById('ddtBadgeBtn');
+    if (ddtBadgeBtn) {
+        ddtBadgeBtn.addEventListener('click', function() {
+            const bubble = document.getElementById('ddtBadgeBubble');
+            bubble.classList.toggle('hidden');
+        });
+    }
+    
+    // Close DDT bubble when clicking outside
+    document.addEventListener('click', function(event) {
+        const bubble = document.getElementById('ddtBadgeBubble');
+        const badgeBtn = document.getElementById('ddtBadgeBtn');
+        if (bubble && !bubble.classList.contains('hidden') && !badgeBtn.contains(event.target) && !bubble.contains(event.target)) {
+            bubble.classList.add('hidden');
+        }
+    });
+    
+    // Navbar scroll effect
+    const navbar = document.getElementById('navbar');
+    const logoContainer = document.getElementById('logoContainer');
+    const logoText = document.getElementById('logoText');
+    
+    window.addEventListener('scroll', function() {
+        if (window.scrollY > 50) {
+            navbar.classList.add('bg-blue-900/95', 'backdrop-blur-xl', 'shadow-lg');
+            navbar.classList.remove('bg-gradient-to-r', 'from-blue-900/90', 'to-teal-800/90');
+            logoContainer.classList.add('scale-90');
+            logoText.classList.add('text-lg');
+            logoText.classList.remove('text-xl');
+        } else {
+            navbar.classList.remove('bg-blue-900/95', 'backdrop-blur-xl', 'shadow-lg');
+            navbar.classList.add('bg-gradient-to-r', 'from-blue-900/90', 'to-teal-800/90');
+            logoContainer.classList.remove('scale-90');
+            logoText.classList.remove('text-lg');
+            logoText.classList.add('text-xl');
+        }
+    });
 });
 
-// Add a new warehouse section
-function addWarehouse() {
-    const form = document.getElementById('warehousesForm');
-    const warehouseIndex = warehouses.length;
-    
-    const warehouse = document.createElement('div');
-    warehouse.className = 'warehouse-section bg-white/5 rounded-xl p-4 border border-white/10';
-    warehouse.id = `warehouse-${warehouseIndex}`;
-    warehouse.innerHTML = `
-        <div class="flex justify-between items-center mb-3">
-            <input type="text" class="warehouse-name bg-white/10 border border-white/30 rounded px-2 py-1 text-white font-semibold text-lg w-40" value="Magazzino ${String.fromCharCode(65 + warehouseIndex)}" onchange="updateWarehouseName(${warehouseIndex}, this.value)">
-            <button onclick="removeWarehouse(${warehouseIndex})" class="remove-btn">Rimuovi</button>
-        </div>
-        <div id="palletForm-${warehouseIndex}" class="space-y-3">
-            <!-- Pallet rows will be added here -->
-        </div>
-        <button onclick="addPalletRow(${warehouseIndex})" class="mt-3 w-full bg-blue-600/50 hover:bg-blue-600/70 text-white font-semibold py-2 px-4 rounded-lg transition duration-200 text-sm">
-            + Aggiungi Pallet
-        </button>
-    `;
-    
-    form.appendChild(warehouse);
-    warehouses.push({ id: warehouseIndex, name: `Magazzino ${String.fromCharCode(65 + warehouseIndex)}` });
-    
-    // Add one pallet row by default
-    addPalletRow(warehouseIndex);
-}
+function showSection(section) {
+    // Hide all sections
+    document.getElementById('calculatorSection').classList.add('hidden');
+    document.getElementById('loginSection').classList.add('hidden');
+    document.getElementById('adminSection').classList.add('hidden');
+    document.getElementById('savedSection').classList.add('hidden');
+    document.getElementById('trackingSection').classList.add('hidden');
+    document.getElementById('deliveredSection').classList.add('hidden');
 
-// Update warehouse name
-function updateWarehouseName(index, newName) {
-    const warehouse = warehouses.find(w => w.id === index);
-    if (warehouse) {
-        warehouse.name = newName;
+    // Show selected section
+    if (section === 'calculator') {
+        document.getElementById('calculatorSection').classList.remove('hidden');
+    } else if (section === 'login') {
+        document.getElementById('loginSection').classList.remove('hidden');
+    } else if (section === 'admin') {
+        document.getElementById('adminSection').classList.remove('hidden');
+        loadRates();
+    } else if (section === 'saved') {
+        document.getElementById('savedSection').classList.remove('hidden');
+        loadSavedCalculations();
+    } else if (section === 'tracking') {
+        document.getElementById('trackingSection').classList.remove('hidden');
+        loadTrackingSection();
+    } else if (section === 'delivered') {
+        document.getElementById('deliveredSection').classList.remove('hidden');
+        loadDeliveredShipments();
     }
 }
 
-// Remove a warehouse
-function removeWarehouse(index) {
-    const warehouse = document.getElementById(`warehouse-${index}`);
-    if (warehouse) {
-        warehouse.remove();
-        warehouses = warehouses.filter(w => w.id !== index);
-        // Re-index remaining warehouses
-        document.querySelectorAll('.warehouse-section').forEach((wh, i) => {
-            const nameInput = wh.querySelector('.warehouse-name');
-            if (nameInput) {
-                nameInput.value = warehouses[i]?.name || `Magazzino ${String.fromCharCode(65 + i)}`;
-                nameInput.onchange = (e) => updateWarehouseName(i, e.target.value);
+async function handleLogin(e) {
+    e.preventDefault();
+
+    const email = document.getElementById('email').value;
+    const password = document.getElementById('password').value;
+
+    try {
+        // Sign in with Firebase Auth
+        const userCredential = await auth.signInWithEmailAndPassword(email, password);
+        const firebaseUser = userCredential.user;
+
+        // Get additional user data from Firestore
+        const userDoc = await db.collection('users').doc(firebaseUser.email).get();
+
+        if (userDoc.exists) {
+            currentUser = {
+                email: firebaseUser.email,
+                ...userDoc.data()
+            };
+            localStorage.setItem('loggedInUser', JSON.stringify(currentUser));
+            updateUIForLoggedInUser();
+
+            // Check if user must change password
+            if (currentUser.mustChangePassword) {
+                showChangePasswordModal();
+            } else {
+                showSection('calculator');
+                showNotification('Login effettuato con successo!', 'success');
             }
-            wh.querySelector('.remove-btn').onclick = () => removeWarehouse(i);
-            wh.id = `warehouse-${i}`;
-        });
+        } else {
+            showNotification('Utente non trovato nel database', 'error');
+            await auth.signOut();
+        }
+    } catch (error) {
+        console.error('Login error:', error);
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+            showNotification('Credenziali non valide', 'error');
+        } else {
+            showNotification('Errore durante il login: ' + error.message, 'error');
+        }
     }
 }
 
-// Add a new pallet row to a specific warehouse
-function addPalletRow(warehouseIndex) {
-    const form = document.getElementById(`palletForm-${warehouseIndex}`);
-    const rowIndex = document.querySelectorAll(`#palletForm-${warehouseIndex} .pallet-row`).length;
-    
-    const row = document.createElement('div');
-    row.className = 'pallet-row';
-    row.id = `pallet-${warehouseIndex}-${rowIndex}`;
-    row.innerHTML = `
-        <div class="flex justify-between items-center mb-2">
-            <span class="text-white/80 text-sm">Pallet #${rowIndex + 1}</span>
-            <button onclick="removePalletRow(${warehouseIndex}, ${rowIndex})" class="remove-btn text-xs py-1 px-2">X</button>
-        </div>
-        <div class="input-group">
-            <div>
-                <div class="input-label">Quantità</div>
-                <input type="number" class="pallet-qty" id="quantity-${warehouseIndex}-${rowIndex}" placeholder="1" step="1" min="1" value="1">
-            </div>
-            <div>
-                <div class="input-label">Lunghezza (m)</div>
-                <input type="number" class="pallet-length" id="length-${warehouseIndex}-${rowIndex}" placeholder="1.2" step="0.01" min="0.1" value="1.2">
-            </div>
-            <div>
-                <div class="input-label">Larghezza (m)</div>
-                <input type="number" class="pallet-width" id="width-${warehouseIndex}-${rowIndex}" placeholder="0.8" step="0.01" min="0.1" value="0.8">
-            </div>
-            <div>
-                <div class="input-label">Altezza (m)</div>
-                <input type="number" class="pallet-height" id="height-${warehouseIndex}-${rowIndex}" placeholder="1.5" step="0.01" min="0.1" value="1.5">
-            </div>
-            <div>
-                <div class="input-label">Peso (kg)</div>
-                <input type="number" class="pallet-weight" id="weight-${warehouseIndex}-${rowIndex}" placeholder="500" step="1" min="1" value="500">
-            </div>
-            <div class="checkbox-group">
-                <input type="checkbox" class="pallet-stackable" id="stackable-${warehouseIndex}-${rowIndex}" checked>
-                <label for="stackable-${warehouseIndex}-${rowIndex}">Sovrapponibile</label>
-            </div>
-        </div>
-    `;
-    
-    form.appendChild(row);
-}
+function updateUIForLoggedInUser() {
+    // Show user menu and logout button
+    document.getElementById('userMenuBtn').classList.remove('hidden');
+    document.getElementById('logoutBtn').classList.remove('hidden');
+    document.getElementById('userName').textContent = currentUser.name;
 
-// Remove a pallet row
-function removePalletRow(warehouseIndex, rowIndex) {
-    const row = document.getElementById(`pallet-${warehouseIndex}-${rowIndex}`);
-    if (row) {
-        row.remove();
-        // Re-index remaining rows
-        const form = document.getElementById(`palletForm-${warehouseIndex}`);
-        form.querySelectorAll('.pallet-row').forEach((row, i) => {
-            row.querySelector('span').textContent = `Pallet #${i + 1}`;
-            row.querySelector('.remove-btn').onclick = () => removePalletRow(warehouseIndex, i);
-            row.id = `pallet-${warehouseIndex}-${i}`;
-        });
-    }
-}
-
-// Collect all pallet data from all warehouses
-function collectAllPalletData() {
-    const data = [];
-    
-    warehouses.forEach(warehouse => {
-        const form = document.getElementById(`palletForm-${warehouse.id}`);
-        const rows = form.querySelectorAll('.pallet-row');
+    // Show admin link if user is admin or GOD
+    if (currentUser.role === 'admin' || currentUser.role === 'god') {
+        document.getElementById('adminLinkBtn').classList.remove('hidden');
+        // Show admin-only columns
+        document.querySelectorAll('.admin-only').forEach(el => el.classList.remove('hidden'));
+        // Hide user-only columns
+        document.querySelectorAll('.user-only').forEach(el => el.classList.add('hidden'));
+        // Add admin-view class to body
+        document.body.classList.add('admin-view');
         
-        rows.forEach((row, rowIndex) => {
-            const quantity = parseInt(document.getElementById(`quantity-${warehouse.id}-${rowIndex}`).value) || 1;
-            const length = parseFloat(document.getElementById(`length-${warehouse.id}-${rowIndex}`).value) || 0;
-            const width = parseFloat(document.getElementById(`width-${warehouse.id}-${rowIndex}`).value) || 0;
-            const height = parseFloat(document.getElementById(`height-${warehouse.id}-${rowIndex}`).value) || 0;
-            const weight = parseFloat(document.getElementById(`weight-${warehouse.id}-${rowIndex}`).value) || 0;
-            const stackable = document.getElementById(`stackable-${warehouse.id}-${rowIndex}`).checked;
-            
-            if (length > 0 && width > 0 && height > 0 && weight > 0 && quantity > 0) {
-                // Weight is total weight for this row, divide by quantity for individual pallet
-                const individualWeight = weight / quantity;
-                
-                for (let i = 0; i < quantity; i++) {
-                    data.push({
-                        id: `${warehouse.id}-${rowIndex}-${i}`,
-                        warehouseId: warehouse.id,
-                        warehouseName: warehouse.name,
-                        length,
-                        width,
-                        height,
-                        weight: individualWeight,
-                        totalWeight: weight,
-                        stackable
+        // Hide admin action buttons for GOD users
+        if (currentUser.role === 'god') {
+            const adminActionButtons = document.getElementById('adminActionButtons');
+            if (adminActionButtons) {
+                adminActionButtons.classList.add('hidden');
+            }
+            // Show client column for GOD users
+            document.querySelectorAll('.god-client-column').forEach(el => el.classList.remove('hidden'));
+        } else {
+            // Hide client column for regular admin users
+            document.querySelectorAll('.god-client-column').forEach(el => el.classList.add('hidden'));
+        }
+    } else {
+        // Hide admin-only columns
+        document.querySelectorAll('.admin-only').forEach(el => el.classList.add('hidden'));
+        // Show user-only columns
+        document.querySelectorAll('.user-only').forEach(el => el.classList.remove('hidden'));
+        // Remove admin-view class from body
+        document.body.classList.remove('admin-view');
+    }
+
+    // Show saved calculations link
+    document.getElementById('savedCalculationsLink').classList.remove('hidden');
+    document.getElementById('savedCalculationsLinkMobile').classList.remove('hidden');
+
+    // Show tracking link
+    document.getElementById('trackingLink').classList.remove('hidden');
+    document.getElementById('trackingLinkMobile').classList.remove('hidden');
+
+    // Show delivered link
+    document.getElementById('deliveredLink').classList.remove('hidden');
+    document.getElementById('deliveredLinkMobile').classList.remove('hidden');
+
+    // Hide login link
+    document.querySelector('nav a[href="#login"]').classList.add('hidden');
+}
+
+async function logout() {
+    try {
+        await auth.signOut();
+    } catch (error) {
+        console.error('Logout error:', error);
+    }
+
+    currentUser = null;
+    localStorage.removeItem('loggedInUser');
+
+    // Update UI
+    document.getElementById('userMenuBtn').classList.add('hidden');
+    document.getElementById('logoutBtn').classList.add('hidden');
+    document.getElementById('adminLinkBtn').classList.add('hidden');
+    document.getElementById('savedCalculationsLink').classList.add('hidden');
+    document.getElementById('savedCalculationsLinkMobile').classList.add('hidden');
+    document.getElementById('trackingLink').classList.add('hidden');
+    document.getElementById('trackingLinkMobile').classList.add('hidden');
+    document.getElementById('deliveredLink').classList.add('hidden');
+    document.getElementById('deliveredLinkMobile').classList.add('hidden');
+    document.querySelector('nav a[href="#login"]').classList.remove('hidden');
+
+    showSection('login');
+    showNotification('Logout effettuato', 'info');
+}
+
+// Migration function to move users from localStorage to Firebase
+async function migrateUsersToFirebase() {
+    const localStorageUsers = JSON.parse(localStorage.getItem('users') || '{}');
+    let migratedCount = 0;
+    let errors = [];
+
+    for (const email in localStorageUsers) {
+        const user = localStorageUsers[email];
+        try {
+            // Create user in Firebase Auth
+            // Note: We need the original password, but localStorage has hashed passwords
+            // This is a limitation - users will need to reset passwords
+            console.log(`Skipping ${email} - password migration not possible`);
+            errors.push(`${email}: Cannot migrate hashed password`);
+        } catch (error) {
+            console.error(`Error migrating ${email}:`, error);
+            errors.push(`${email}: ${error.message}`);
+        }
+    }
+
+    console.log(`Migration complete. Migrated: ${migratedCount}, Errors: ${errors.length}`);
+    return { migratedCount, errors };
+}
+
+// Function to create a new user in Firebase (for admin use)
+async function createFirebaseUser(email, password, name, role) {
+    try {
+        // Create user in Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+
+        // Save additional user data to Firestore
+        await db.collection('users').doc(email).set({
+            name: name,
+            role: role,
+            mustChangePassword: true,
+            userNumber: 0,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+
+        showNotification(`Utente ${email} creato con successo!`, 'success');
+
+        // Sign out after creation
+        await auth.signOut();
+
+        return true;
+    } catch (error) {
+        console.error('Error creating user:', error);
+        showNotification('Errore nella creazione utente: ' + error.message, 'error');
+        return false;
+    }
+}
+
+// Helper function to create a GOD user (read-only admin)
+// Usage: createGodUser('god@esaving.eu', 'password', 'GOD User')
+async function createGodUser(email, password, name) {
+    try {
+        console.log('Creating GOD user...');
+
+        // Create user in Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+        console.log('Firebase Auth user created');
+
+        // Save additional user data to Firestore
+        await db.collection('users').doc(email).set({
+            name: name,
+            role: 'god',
+            mustChangePassword: true,
+            userNumber: 0,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log('Firestore user data saved');
+
+        // Sign out after creation
+        await auth.signOut();
+        console.log('Signed out');
+
+        console.log('✅ GOD user created successfully!');
+        console.log(`Email: ${email}`);
+        console.log(`Password: ${password}`);
+        console.log('Please login with these credentials and change the password.');
+
+        return true;
+    } catch (error) {
+        console.error('❌ Error creating GOD user:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            console.log('User already exists. You can login with existing credentials.');
+        }
+        return false;
+    }
+}
+
+// Helper function to create initial admin user (run from browser console)
+// Usage: createInitialAdmin('logistica@esaving.eu', '123456', 'Amministratore')
+async function createInitialAdmin(email, password, name) {
+    try {
+        console.log('Creating initial admin user...');
+
+        // Create user in Firebase Auth
+        const userCredential = await auth.createUserWithEmailAndPassword(email, password);
+        console.log('Firebase Auth user created');
+
+        // Save additional user data to Firestore
+        await db.collection('users').doc(email).set({
+            name: name,
+            role: 'admin',
+            mustChangePassword: true,
+            userNumber: 0,
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log('Firestore user data saved');
+
+        // Sign out after creation
+        await auth.signOut();
+        console.log('Signed out');
+
+        console.log('✅ Admin user created successfully!');
+        console.log(`Email: ${email}`);
+        console.log(`Password: ${password}`);
+        console.log('Please login with these credentials and change the password.');
+
+        return true;
+    } catch (error) {
+        console.error('❌ Error creating admin user:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            console.log('User already exists. You can login with existing credentials.');
+        }
+        return false;
+    }
+}
+
+function populateProvinces() {
+    // No longer needed for select, but keep for compatibility
+    // Province autocomplete is now handled by input field
+}
+
+// Province autocomplete functionality
+let selectedProvincia = '';
+
+function initProvinceAutocomplete() {
+    const input = document.getElementById('provincia');
+    const suggestions = document.getElementById('provinciaSuggestions');
+
+    if (!input || !suggestions) {
+        console.error('Province autocomplete elements not found');
+        return;
+    }
+
+    console.log('Initializing province autocomplete, total provinces:', Object.keys(tariffeProvinciali).length);
+
+    // Show suggestions on input
+    input.addEventListener('input', function() {
+        const value = this.value.toLowerCase();
+        console.log('Input value:', value, 'length:', value.length);
+
+        if (value.length < 1) {
+            suggestions.classList.add('hidden');
+            return;
+        }
+
+        const matches = [];
+        Object.keys(tariffeProvinciali).forEach(provincia => {
+            const dati = tariffeProvinciali[provincia];
+            if (dati) {
+                const sigla = dati.sigla || '';
+                const nome = dati.nome || provincia;
+                const searchTerms = `${nome} ${sigla} ${provincia}`.toLowerCase();
+
+                if (searchTerms.includes(value)) {
+                    matches.push({
+                        key: provincia,
+                        nome: nome,
+                        sigla: sigla
                     });
                 }
             }
         });
+
+        console.log('Found matches:', matches.length);
+
+        // Sort by relevance (exact match first)
+        matches.sort((a, b) => {
+            const aExact = a.sigla.toLowerCase() === value || a.nome.toLowerCase() === value;
+            const bExact = b.sigla.toLowerCase() === value || b.nome.toLowerCase() === value;
+            if (aExact && !bExact) return -1;
+            if (!aExact && bExact) return 1;
+            return a.nome.localeCompare(b.nome);
+        });
+
+        // Show max 8 suggestions
+        const limitedMatches = matches.slice(0, 8);
+
+        if (limitedMatches.length === 0) {
+            suggestions.classList.add('hidden');
+            return;
+        }
+
+        suggestions.innerHTML = limitedMatches.map(match => {
+            const escapedKey = match.key.replace(/'/g, "\\'");
+            const escapedDisplay = `${match.nome} - ${match.sigla}`.replace(/'/g, "\\'");
+            return `
+            <div class="px-4 py-3 hover:bg-gray-100 cursor-pointer transition" onclick="selectProvincia('${escapedKey}', '${escapedDisplay}')">
+                <div class="text-sm font-medium text-gray-900">${match.nome}</div>
+                <div class="text-xs text-gray-500">${match.sigla}</div>
+            </div>
+        `;
+        }).join('');
+
+        suggestions.classList.remove('hidden');
+        console.log('Suggestions shown:', limitedMatches.length);
     });
+
+    // Hide suggestions on click outside
+    document.addEventListener('click', function(e) {
+        if (!input.contains(e.target) && !suggestions.contains(e.target)) {
+            suggestions.classList.add('hidden');
+        }
+    });
+
+    // Hide suggestions on escape key
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            suggestions.classList.add('hidden');
+        }
+    });
+}
+
+function selectProvincia(key, displayValue) {
+    const input = document.getElementById('provincia');
+    const suggestions = document.getElementById('provinciaSuggestions');
+
+    input.value = displayValue;
+    selectedProvincia = key;
+    suggestions.classList.add('hidden');
+}
+
+// Toggle option buttons
+function toggleOption(field, value) {
+    // Update hidden input
+    document.getElementById(field).value = value;
+
+    // Update button styles
+    const buttons = document.querySelectorAll(`[id^="${field}-"]`);
+    buttons.forEach(btn => {
+        btn.classList.remove('selected');
+        btn.style.background = 'rgba(255, 255, 255, 0.1)';
+        btn.style.borderColor = 'rgba(255, 255, 255, 0.2)';
+    });
+
+    // Highlight selected button
+    const selectedBtn = document.getElementById(`${field}-${value}`);
+    if (selectedBtn) {
+        selectedBtn.classList.add('selected');
+        selectedBtn.style.background = 'linear-gradient(to right, #0ea5e9, #14b8a6)';
+        selectedBtn.style.borderColor = '#14b8a6';
+    }
+}
+
+function calculateCost() {
+    const provincia = selectedProvincia;
+    const peso = parseFloat(document.getElementById('peso').value);
+    const sponda = document.getElementById('sponda').value;
+    const batteria = document.getElementById('batteria').value;
+    const fascio = document.getElementById('fascio').value;
+    const palletSfuso = document.getElementById('palletSfuso').value;
+    const numeroRighe = parseInt(document.getElementById('numeroRighe').value) || 0;
+
+    if (!provincia || !peso) {
+        showNotification('Per favore compila tutti i campi obbligatori', 'error');
+        return;
+    }
+    
+    const datiProvincia = tariffeProvinciali[provincia];
+    if (!datiProvincia) {
+        showNotification('Provincia non trovata nelle tariffe', 'error');
+        return;
+    }
+    
+    // Calcolo del nolo iniziale
+    const noloBase = getCostoNoloBase(provincia, peso);
+    let noloFinale = noloBase;
+    let moltiplicatoreQuintali = 1;
+    
+    // Oltre i 100 kg, moltiplica per il numero di quintali in eccesso
+    if (peso > 100) {
+        const quintali = Math.ceil(peso / 100);
+        moltiplicatoreQuintali = quintali;
+        noloFinale = noloBase * moltiplicatoreQuintali;
+    }
+    
+    // Calcolo delle regole aggiuntive
+    let viaggioADRCosto = 0;
+    let spondaIdraulicaCosto = 0;
+    let dirittoFissoCosto = 0;
+    let preavvisoTelCosto = 0;
+    let preparazioneMerceCosto = 0;
+    let assicurazioneCosto = 0;
+    let fasciCosto = 0;
+    let palletSfusoCosto = 0;
+    let costoPerRigaCosto = 0;
+    let fuelCosto = 0;
+    let incremento2026Costo = 0;
+    
+    // Province speciali: TUTTE le province di Calabria, Sicilia, Sardegna + Avellino, Salerno, Benevento
+    const regione = datiProvincia ? datiProvincia.regione : '';
+    
+    const regioniSpeciali = ['Calabria', 'Sicilia', 'Sardegna'];
+    const provinceCampaniaSpeciali = ['Benevento', 'Avellino', 'Salerno'];
+    
+    const isProvinciaSpeciale = regioniSpeciali.includes(regione) || 
+                                (regione === 'Campania' && provinceCampaniaSpeciali.includes(provincia));
+    
+    // Regola VIAGGIO ADR (se batteria = sì)
+    if (batteria === 'si') {
+        if (isProvinciaSpeciale) {
+            // ADRARCO per province speciali
+            const adrPercentuale = getRegolaValue('ADRARCO');
+            viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        } else {
+            // VIAGGIO ADR normale per altre province
+            const adrPercentuale = getRegolaValue('VIAGGIO ADR');
+            viaggioADRCosto = noloFinale * (adrPercentuale / 100);
+        }
+    }
+    
+    // Regola SPONDA IDRAULICA (se sponda = sì)
+    if (sponda === 'si') {
+        spondaIdraulicaCosto = getRegolaValue('SPONDA IDRAULICA');
+    }
+    
+    // Costi fissi
+    dirittoFissoCosto = getRegolaValue('DIRITTO FISSO');
+    preavvisoTelCosto = getRegolaValue('PREAVVISO TEL.');
+    preparazioneMerceCosto = getRegolaValue('PREPARAZIONE MERCE');
+    
+    // Regola ASSICURAZIONE
+    if (isProvinciaSpeciale) {
+        // ASSICURAZIONE ARCO (arrotonda kg alla decina superiore)
+        const assicurazioneBase = getRegolaValue('ASSICURAZIONE ARCO');
+        const kgArrotondati = Math.ceil(peso / 10) * 10; // Arrotonda alla decina superiore
+        assicurazioneCosto = assicurazioneBase * kgArrotondati;
+    } else {
+        // ASSICURAZIONE normale (ogni 100 kg)
+        const assicurazioneBase = getRegolaValue('ASSICURAZIONE');
+        const quintaliAssicurazione = Math.ceil(peso / 100);
+        assicurazioneCosto = assicurazioneBase * quintaliAssicurazione;
+    }
+    
+    // Regola FASCI
+    if (fascio !== 'no') {
+        if (isProvinciaSpeciale) {
+            // Nuova regola per province speciali: fascio = nolo + supplemento
+            if (fascio === '3-4') {
+                fasciCosto = noloFinale + 50;
+            } else if (fascio === '4-5') {
+                fasciCosto = noloFinale + 75;
+            } else if (fascio === 'oltre5') {
+                fasciCosto = noloFinale + 100;
+            }
+        } else {
+            // Regola normale per altre province
+            const fasciBase = getRegolaValue('FASCI');
+            if (fascio === '3-4') {
+                fasciCosto = fasciBase;
+            } else if (fascio === '4-5') {
+                fasciCosto = fasciBase * 2;
+            } else if (fascio === 'oltre5') {
+                fasciCosto = fasciBase * 3;
+            }
+        }
+    }
+    
+    // Regola PALLET SFUSO (se palletSfuso = sì)
+    if (palletSfuso === 'si') {
+        palletSfusoCosto = getRegolaValue('PALLET SFUSO');
+    }
+    
+    // Regola COSTO PER RIGA
+    const costoPerRigaBase = getRegolaValue('COSTO PER RIGA');
+    costoPerRigaCosto = numeroRighe * costoPerRigaBase;
+    
+    // Calcolo somma parziale per fuel e incremento
+    const sommaParziale = noloFinale + viaggioADRCosto + spondaIdraulicaCosto + dirittoFissoCosto + preavvisoTelCosto + preparazioneMerceCosto + assicurazioneCosto + fasciCosto + palletSfusoCosto + costoPerRigaCosto;
+    
+    // Regola FUEL ADDIZIONALE 995 e 996 (somma delle percentuali)
+    const fuelPercentuale = getFuelPercentuale();
+    fuelCosto = sommaParziale * (fuelPercentuale / 100);
+    
+    // Calcolo somma prima di incremento 2026
+    const sommaPrimaIncremento = sommaParziale + fuelCosto;
+    
+    // Regola INCREMENTO 2026
+    const incrementoPercentuale = getRegolaValue('INCREMENTO 2026');
+    incremento2026Costo = sommaPrimaIncremento * (incrementoPercentuale / 100);
+    
+    // Calcolo totale prima di ISTAT ARCO
+    const totalePrimaIstat = sommaPrimaIncremento + incremento2026Costo;
+    
+    // Regola ISTAT ARCO (solo per province speciali)
+    let istatArcoCosto = 0;
+    
+    if (isProvinciaSpeciale) {
+        const istatArcoPercentuale = getRegolaValue('ISTAT ARCO');
+        istatArcoCosto = totalePrimaIstat * (istatArcoPercentuale / 100);
+    }
+    
+    // Calcolo totale finale
+    const totale = totalePrimaIstat + istatArcoCosto;
+    
+    // Salva il calcolo corrente
+    currentCalculation = {
+        provincia: provincia,
+        peso: peso,
+        sponda: sponda,
+        batteria: batteria,
+        fascio: fascio,
+        palletSfuso: palletSfuso,
+        numeroRighe: numeroRighe,
+        result: {
+            provincia: `${provincia} - ${datiProvincia.nome}`,
+            regione: datiProvincia.regione,
+            peso: peso,
+            sponda: sponda,
+            batteria: batteria,
+            fascio: fascio,
+            palletSfuso: palletSfuso,
+            numeroRighe: numeroRighe,
+            noloBase: noloBase,
+            moltiplicatoreQuintali: moltiplicatoreQuintali,
+            noloFinale: noloFinale,
+            viaggioADRCosto: viaggioADRCosto,
+            spondaIdraulicaCosto: spondaIdraulicaCosto,
+            dirittoFissoCosto: dirittoFissoCosto,
+            preavvisoTelCosto: preavvisoTelCosto,
+            preparazioneMerceCosto: preparazioneMerceCosto,
+            assicurazioneCosto: assicurazioneCosto,
+            fasciCosto: fasciCosto,
+            palletSfusoCosto: palletSfusoCosto,
+            costoPerRigaCosto: costoPerRigaCosto,
+            fuelCosto: fuelCosto,
+            incremento2026Costo: incremento2026Costo,
+            istatArcoCosto: istatArcoCosto,
+            totale: totale
+        }
+    };
+    
+    displayCalculationResult({
+        provincia: `${provincia} - ${datiProvincia.nome}`,
+        regione: datiProvincia.regione,
+        peso: peso,
+        sponda: sponda,
+        batteria: batteria,
+        fascio: fascio,
+        palletSfuso: palletSfuso,
+        numeroRighe: numeroRighe,
+        noloBase: noloBase,
+        moltiplicatoreQuintali: moltiplicatoreQuintali,
+        noloFinale: noloFinale,
+        viaggioADRCosto: viaggioADRCosto,
+        spondaIdraulicaCosto: spondaIdraulicaCosto,
+        dirittoFissoCosto: dirittoFissoCosto,
+        preavvisoTelCosto: preavvisoTelCosto,
+        preparazioneMerceCosto: preparazioneMerceCosto,
+        assicurazioneCosto: assicurazioneCosto,
+        fasciCosto: fasciCosto,
+        palletSfusoCosto: palletSfusoCosto,
+        costoPerRigaCosto: costoPerRigaCosto,
+        fuelCosto: fuelCosto,
+        incremento2026Costo: incremento2026Costo,
+        istatArcoCosto: istatArcoCosto,
+        totale: totale
+    });
+}
+
+function getFuelPercentuale() {
+    const regola = regoleCalcolo['FUEL ADDIZIONALE 995 e 996'];
+    if (!regola) return 0;
+    
+    // Estrai le percentuali dalla stringa "+4% +8,3%"
+    let valore = regola.valore;
+    const matches = valore.match(/(\d+[\.,]\d+|\d+)%/g);
+    
+    if (matches && matches.length > 0) {
+        let totalePercentuale = 0;
+        matches.forEach(match => {
+            let percentuale = match.replace('%', '').replace(',', '.');
+            totalePercentuale += parseFloat(percentuale) || 0;
+        });
+        return totalePercentuale;
+    }
+    
+    return 0;
+}
+
+function getRegolaValue(nomeRegola) {
+    const regola = regoleCalcolo[nomeRegola];
+    if (!regola) return 0;
+    
+    // Estrai il valore numerico dalla stringa (rimuovi %, €, ecc.)
+    let valore = regola.valore.replace(',', '.').replace('%', '').replace('€', '').trim();
+    return parseFloat(valore) || 0;
+}
+
+function getCostoNoloBase(provincia, peso) {
+    const datiProvincia = tariffeProvinciali[provincia];
+    if (!datiProvincia) {
+        return 0;
+    }
+    
+    // Per province con costo a quintale (es. Ancona), calcola in base al peso
+    if (provincia === 'AN') {
+        // 20.889€ a quintale (100kg), arrotonda peso a 100kg superiori
+        const quintali = Math.ceil(peso / 100);
+        return 20.889 * quintali;
+    }
+    
+    // Per altre province, usa le fasce di peso
+    let colonnaIndex;
+    if (peso <= 25) {
+        colonnaIndex = 0; // 0-25kg
+    } else if (peso <= 50) {
+        colonnaIndex = 1; // 26-50kg
+    } else if (peso <= 75) {
+        colonnaIndex = 2; // 51-75kg
+    } else if (peso <= 100) {
+        colonnaIndex = 3; // 76-100kg
+    } else {
+        colonnaIndex = 4; // >100kg (base rate, poi moltiplicato per quintali)
+    }
+    
+    return datiProvincia.costi[colonnaIndex];
+}
+
+function displayCalculationResult(result) {
+    const resultDiv = document.getElementById('calculationResult');
+    const actionButtons = document.getElementById('actionButtons');
+    
+    // Calcolo Fermo Deposito (pallet sfuso + costo per riga + preparazione merce)
+    const fermoDeposito = result.palletSfusoCosto + result.costoPerRigaCosto + result.preparazioneMerceCosto;
+    
+    resultDiv.innerHTML = `
+        <div class="space-y-4">
+            <!-- Riepilogo Dati -->
+            <div class="bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10">
+                <h4 class="font-semibold text-white mb-3 flex items-center">
+                    <i class="fas fa-info-circle mr-2 text-blue-400"></i> Riepilogo Dati
+                </h4>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Provincia:</span>
+                        <span class="font-medium text-white">${result.provincia}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Regione:</span>
+                        <span class="font-medium text-white">${result.regione}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Peso:</span>
+                        <span class="font-medium text-white">${result.peso} kg</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Sponda Idraulica:</span>
+                        <span class="font-medium text-white">${result.sponda === 'si' ? 'Sì' : 'No'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Batteria:</span>
+                        <span class="font-medium text-white">${result.batteria === 'si' ? 'Sì' : 'No'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Fascio:</span>
+                        <span class="font-medium text-white">${result.fascio === 'no' ? 'No' : result.fascio}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Pallet Moduli Sfusi:</span>
+                        <span class="font-medium text-white">${result.palletSfuso === 'si' ? 'Sì' : 'No'}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-white/60">Numero Righe d'Ordine:</span>
+                        <span class="font-medium text-white">${result.numeroRighe}</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Risultati Finali -->
+            <div class="space-y-4">
+                <div class="bg-gradient-to-r from-blue-500/20 to-purple-500/20 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+                    <div class="flex justify-between items-center">
+                        <span class="text-white font-semibold text-lg">Costo Logistica + Trasporto:</span>
+                        <span class="text-4xl font-bold text-white">€ ${Math.round(result.totale)}</span>
+                    </div>
+                </div>
+                <div class="bg-gradient-to-r from-green-500/20 to-emerald-500/20 backdrop-blur-sm rounded-xl p-6 border border-white/20">
+                    <div class="flex justify-between items-center">
+                        <span class="text-white font-semibold text-lg">Fermo Deposito:</span>
+                        <span class="text-4xl font-bold text-white">€ ${Math.round(fermoDeposito)}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Mostra i pulsanti di azione
+    actionButtons.classList.remove('hidden');
+}
+
+function resetCalculator() {
+    // Resetta tutti i campi del form
+    document.getElementById('provincia').value = '';
+    selectedProvincia = '';
+    document.getElementById('peso').value = '';
+    
+    // Resetta i risultati
+    document.getElementById('calculationResult').innerHTML = `
+        <div class="text-center text-gray-500 py-8">
+            <i class="fas fa-info-circle text-4xl mb-3"></i>
+            <p>Inserisci provincia e peso per calcolare i costi</p>
+        </div>
+    `;
+    
+    // Nascondi i pulsanti di azione
+    document.getElementById('actionButtons').classList.add('hidden');
+    
+    showNotification('Calcolatore resettato', 'info');
+}
+
+// Admin Panel Functions
+function showAdminTab(tabName) {
+    // Hide all tab contents
+    document.querySelectorAll('.admin-tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+
+    // Remove active class from all tabs
+    document.querySelectorAll('.admin-tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+    });
+
+    // Show selected tab content
+    const content = document.getElementById(tabName + 'TabContent');
+    if (content) {
+        content.classList.add('active');
+    }
+
+    // Add active class to selected tab
+    const tab = document.getElementById(tabName + 'Tab');
+    if (tab) {
+        tab.classList.add('active');
+    }
+
+    // Load tab-specific content
+    if (tabName === 'rates') {
+        loadRatesTable();
+    } else if (tabName === 'rules') {
+        loadRulesTable();
+    } else if (tabName === 'carriers') {
+        loadCarriersTable();
+    } else if (tabName === 'clients') {
+        loadClientsTable();
+    } else if (tabName === 'users') {
+        loadUsersTable();
+    }
+}
+
+async function loadRates() {
+    try {
+        // Try loading from Firestore first
+        const snapshot = await db.collection('rates').get();
+
+        if (!snapshot.empty) {
+            tariffeProvinciali = {};
+            snapshot.forEach(doc => {
+                tariffeProvinciali[doc.id] = doc.data();
+            });
+            console.log('Rates loaded from Firestore, count:', Object.keys(tariffeProvinciali).length);
+            console.log('Sample province:', Object.keys(tariffeProvinciali)[0], tariffeProvinciali[Object.keys(tariffeProvinciali)[0]]);
+            // Reinitialize autocomplete after data is loaded
+            setTimeout(() => initProvinceAutocomplete(), 100);
+        } else {
+            // Fallback to localStorage if Firestore is empty
+            const savedRates = localStorage.getItem('tariffeProvinciali');
+            if (savedRates) {
+                tariffeProvinciali = JSON.parse(savedRates);
+                // Add sigla field if missing
+                Object.keys(tariffeProvinciali).forEach(provincia => {
+                    if (!tariffeProvinciali[provincia].sigla) {
+                        tariffeProvinciali[provincia].sigla = '';
+                    }
+                });
+                console.log('Rates loaded from localStorage (fallback), count:', Object.keys(tariffeProvinciali).length);
+                console.log('Sample province:', Object.keys(tariffeProvinciali)[0], tariffeProvinciali[Object.keys(tariffeProvinciali)[0]]);
+                setTimeout(() => initProvinceAutocomplete(), 100);
+            } else {
+                tariffeProvinciali = {...defaultTariffeProvinciali};
+                console.log('Rates loaded from default, count:', Object.keys(tariffeProvinciali).length);
+                await saveRates();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading rates from Firestore:', error);
+        console.error('Error code:', error.code);
+        // Fallback to localStorage on error
+        const savedRates = localStorage.getItem('tariffeProvinciali');
+        if (savedRates) {
+            tariffeProvinciali = JSON.parse(savedRates);
+            Object.keys(tariffeProvinciali).forEach(provincia => {
+                if (!tariffeProvinciali[provincia].sigla) {
+                    tariffeProvinciali[provincia].sigla = '';
+                }
+            });
+            console.log('Rates loaded from localStorage (error fallback), count:', Object.keys(tariffeProvinciali).length);
+            setTimeout(() => initProvinceAutocomplete(), 100);
+        } else {
+            tariffeProvinciali = {...defaultTariffeProvinciali};
+            console.log('Rates loaded from default (error), count:', Object.keys(tariffeProvinciali).length);
+            saveRates();
+        }
+    }
+}
+
+async function saveRates() {
+    try {
+        // Save to Firestore
+        for (const provincia in tariffeProvinciali) {
+            await db.collection('rates').doc(provincia).set(tariffeProvinciali[provincia]);
+        }
+        console.log('Rates saved to Firestore');
+
+        // Also save to localStorage as backup
+        localStorage.setItem('tariffeProvinciali', JSON.stringify(tariffeProvinciali));
+    } catch (error) {
+        console.error('Error saving rates to Firestore:', error);
+        // Fallback to localStorage on error
+        localStorage.setItem('tariffeProvinciali', JSON.stringify(tariffeProvinciali));
+        console.log('Rates saved to localStorage (error fallback)');
+    }
+}
+
+async function loadRules() {
+    try {
+        // Try loading from Firestore first
+        const snapshot = await db.collection('rules').get();
+
+        if (!snapshot.empty) {
+            regoleCalcolo = {};
+            snapshot.forEach(doc => {
+                regoleCalcolo[doc.id] = doc.data();
+            });
+            console.log('Rules loaded from Firestore');
+        } else {
+            // Fallback to localStorage if Firestore is empty
+            const savedRules = localStorage.getItem('regoleCalcolo');
+            if (savedRules) {
+                regoleCalcolo = JSON.parse(savedRules);
+                console.log('Rules loaded from localStorage (fallback)');
+            } else {
+                regoleCalcolo = {...defaultRegoleCalcolo};
+                await saveRules();
+            }
+        }
+    } catch (error) {
+        console.error('Error loading rules from Firestore:', error);
+        // Fallback to localStorage on error
+        const savedRules = localStorage.getItem('regoleCalcolo');
+        if (savedRules) {
+            regoleCalcolo = JSON.parse(savedRules);
+            console.log('Rules loaded from localStorage (error fallback)');
+        } else {
+            regoleCalcolo = {...defaultRegoleCalcolo};
+            saveRules();
+        }
+    }
+}
+
+async function saveRules() {
+    try {
+        // Save to Firestore
+        for (const nome in regoleCalcolo) {
+            await db.collection('rules').doc(nome).set(regoleCalcolo[nome]);
+        }
+        console.log('Rules saved to Firestore');
+
+        // Also save to localStorage as backup
+        localStorage.setItem('regoleCalcolo', JSON.stringify(regoleCalcolo));
+    } catch (error) {
+        console.error('Error saving rules to Firestore:', error);
+        // Fallback to localStorage on error
+        localStorage.setItem('regoleCalcolo', JSON.stringify(regoleCalcolo));
+        console.log('Rules saved to localStorage (error fallback)');
+    }
+}
+
+async function loadCarriers() {
+    try {
+        // Try loading from Firestore first
+        const snapshot = await db.collection('carriers').get();
+
+        if (!snapshot.empty) {
+            vettori = {};
+            snapshot.forEach(doc => {
+                vettori[doc.id] = doc.data();
+            });
+            console.log('Carriers loaded from Firestore');
+        } else {
+            // Fallback to localStorage if Firestore is empty
+            const savedCarriers = localStorage.getItem('vettori');
+            if (savedCarriers) {
+                vettori = JSON.parse(savedCarriers);
+                console.log('Carriers loaded from localStorage (fallback)');
+            }
+        }
+    } catch (error) {
+        console.error('Error loading carriers from Firestore:', error);
+        // Fallback to localStorage on error
+        const savedCarriers = localStorage.getItem('vettori');
+        if (savedCarriers) {
+            vettori = JSON.parse(savedCarriers);
+            console.log('Carriers loaded from localStorage (error fallback)');
+        }
+    }
+}
+
+async function saveCarriers() {
+    try {
+        // Save to Firestore
+        for (const nome in vettori) {
+            await db.collection('carriers').doc(nome).set(vettori[nome]);
+        }
+        console.log('Carriers saved to Firestore');
+
+        // Also save to localStorage as backup
+        localStorage.setItem('vettori', JSON.stringify(vettori));
+    } catch (error) {
+        console.error('Error saving carriers to Firestore:', error);
+        // Fallback to localStorage on error
+        localStorage.setItem('vettori', JSON.stringify(vettori));
+        console.log('Carriers saved to localStorage (error fallback)');
+    }
+}
+
+async function loadClients() {
+    try {
+        // Try loading from localStorage first (primary storage for clients)
+        const savedClients = localStorage.getItem('clienti');
+        if (savedClients) {
+            clienti = JSON.parse(savedClients);
+            console.log('Clients loaded from localStorage (primary), count:', Object.keys(clienti).length);
+            return;
+        }
+
+        // Fallback to Firestore only if localStorage is empty
+        console.log('No clients in localStorage, loading from Firestore...');
+        const snapshot = await db.collection('clients').get();
+
+        if (!snapshot.empty) {
+            clienti = {};
+            snapshot.forEach(doc => {
+                clienti[doc.id] = doc.data();
+            });
+            console.log('Clients loaded from Firestore (fallback), count:', Object.keys(clienti).length);
+            
+            // Save to localStorage for future use
+            localStorage.setItem('clienti', JSON.stringify(clienti));
+        } else {
+            console.log('No clients found in Firestore');
+            clienti = {};
+        }
+    } catch (error) {
+        console.error('Error loading clients from Firestore:', error);
+        // Try localStorage as final fallback
+        const savedClients = localStorage.getItem('clienti');
+        if (savedClients) {
+            clienti = JSON.parse(savedClients);
+            console.log('Clients loaded from localStorage (error fallback), count:', Object.keys(clienti).length);
+        } else {
+            clienti = {};
+        }
+    }
+}
+
+async function saveClients() {
+    try {
+        // Normalize client data before saving to Firestore
+        const normalizedClients = {};
+        for (const codice in clienti) {
+            const clientData = clienti[codice];
+            if (typeof clientData === 'object' && clientData !== null) {
+                normalizedClients[codice] = clientData;
+            } else {
+                // Convert old format (number) to new format (object)
+                normalizedClients[codice] = {
+                    userNumber: clientData,
+                    nome: ''
+                };
+            }
+        }
+        
+        // Save to Firestore
+        for (const codice in normalizedClients) {
+            await db.collection('clients').doc(codice).set(normalizedClients[codice]);
+        }
+        console.log('Clients saved to Firestore');
+
+        // Also save to localStorage as backup
+        localStorage.setItem('clienti', JSON.stringify(normalizedClients));
+    } catch (error) {
+        console.error('Error saving clients to Firestore:', error);
+        // Fallback to localStorage on error
+        localStorage.setItem('clienti', JSON.stringify(clienti));
+        console.log('Clients saved to localStorage (error fallback)');
+    }
+}
+
+function loadUsers() {
+    const savedUsers = localStorage.getItem('users');
+    if (savedUsers) {
+        Object.assign(users, JSON.parse(savedUsers));
+    }
+}
+
+function saveUsers() {
+    localStorage.setItem('users', JSON.stringify(users));
+}
+
+async function loadShipments() {
+    try {
+        // Load from Firestore only (localStorage quota exceeded)
+        const snapshot = await db.collection('shipments').get();
+
+        if (!snapshot.empty) {
+            spedizioni = {};
+            snapshot.forEach(doc => {
+                spedizioni[doc.id] = doc.data();
+            });
+            console.log('Shipments loaded from Firestore, count:', Object.keys(spedizioni).length);
+        } else {
+            console.log('No shipments found in Firestore');
+            spedizioni = {};
+        }
+    } catch (error) {
+        console.error('Error loading shipments from Firestore:', error);
+        showNotification('Errore nel caricamento delle spedizioni: ' + error.message, 'error');
+        spedizioni = {};
+    }
+}
+
+async function saveShipments() {
+    // This function is deprecated - shipments are now saved individually to Firestore
+    // to avoid quota issues. Use saveNewShipment, saveShipmentEdit, or deleteShipment instead.
+    console.warn('saveShipments() is deprecated. Individual shipment operations are now used.');
+}
+
+function loadRatesTable() {
+    const tbody = document.getElementById('ratesTableBody');
+    tbody.innerHTML = '';
+    
+    Object.keys(tariffeProvinciali).sort().forEach(provincia => {
+        const dati = tariffeProvinciali[provincia];
+        if (dati) {
+            const row = document.createElement('tr');
+            row.className = 'editable-rate';
+            row.innerHTML = `
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${provincia}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${dati.sigla || ''}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${dati.regione}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">€ ${dati.costi[0].toFixed(3)}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">€ ${dati.costi[1].toFixed(3)}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">€ ${dati.costi[2].toFixed(3)}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">€ ${dati.costi[3].toFixed(3)}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">€ ${dati.costi[4].toFixed(3)}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <button onclick="editRate('${provincia}')" class="text-blue-600 hover:text-blue-800 mr-2">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="deleteRate('${provincia}')" class="text-red-600 hover:text-red-800 mr-2">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        }
+    });
+}
+
+function editRate(provincia) {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    const dati = tariffeProvinciali[provincia];
+    
+    if (!dati) return;
+    
+    content.innerHTML = `
+        <form id="rateEditForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Modifica Tariffa: ${provincia} - ${dati.nome}</h4>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Provincia</label>
+                    <input type="text" value="${provincia}" disabled class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Provincia</label>
+                    <input type="text" id="editRateNome" value="${dati.nome}" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Sigla</label>
+                    <input type="text" id="editRateSigla" value="${dati.sigla || ''}" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. MI">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Regione</label>
+                    <input type="text" id="editRateRegione" value="${dati.regione}" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 0-25kg</label>
+                    <input type="number" id="editRate0" value="${dati.costi[0]}" step="0.001" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 26-50kg</label>
+                    <input type="number" id="editRate1" value="${dati.costi[1]}" step="0.001" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 51-75kg</label>
+                    <input type="number" id="editRate2" value="${dati.costi[2]}" step="0.001" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 76-100kg</label>
+                    <input type="number" id="editRate3" value="${dati.costi[3]}" step="0.001" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo >100kg</label>
+                    <input type="number" id="editRate4" value="${dati.costi[4]}" step="0.001" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+            
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva Modifiche
+                </button>
+            </div>
+        </form>
+    `;
+    
+    modal.classList.remove('hidden');
+    
+    document.getElementById('rateEditForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveRateEdit(provincia);
+    });
+}
+
+function saveRateEdit(provincia) {
+    const costi = [
+        parseFloat(document.getElementById('editRate0').value) || 0,
+        parseFloat(document.getElementById('editRate1').value) || 0,
+        parseFloat(document.getElementById('editRate2').value) || 0,
+        parseFloat(document.getElementById('editRate3').value) || 0,
+        parseFloat(document.getElementById('editRate4').value) || 0
+    ];
+    
+    tariffeProvinciali[provincia] = {
+        nome: document.getElementById('editRateNome').value,
+        sigla: document.getElementById('editRateSigla').value,
+        regione: document.getElementById('editRateRegione').value,
+        costi: costi
+    };
+    
+    saveRates();
+    closeRateModal();
+    loadRatesTable();
+    populateProvinces(); // Update province dropdown
+    showNotification(`Tariffa ${provincia} aggiornata con successo!`, 'success');
+}
+
+function closeRateModal() {
+    document.getElementById('rateModal').classList.add('hidden');
+}
+
+// DDT Continuity Check Functions
+function extractBaseDDT(ddtNumber) {
+    // Extract base number from DDT (remove suffixes like A, B, etc.)
+    return parseInt(ddtNumber.toString().replace(/[^0-9]/g, ''));
+}
+
+function getPreviousHundredRange(ddtNumber) {
+    const baseNumber = extractBaseDDT(ddtNumber);
+    const currentHundred = Math.floor(baseNumber / 100) * 100;
+    const previousHundred = currentHundred - 100;
+    return {
+        start: previousHundred,
+        end: currentHundred - 1
+    };
+}
+
+function checkMissingDDTsInRange(start, end) {
+    const missingDDTs = [];
+    const existingDDTs = new Set();
+    
+    // Collect all existing DDTs in the range
+    Object.values(spedizioni).forEach(shipment => {
+        const baseDDT = extractBaseDDT(shipment.nrDDT);
+        if (baseDDT >= start && baseDDT <= end) {
+            existingDDTs.add(baseDDT);
+        }
+    });
+    
+    // Find missing DDTs
+    for (let i = start; i <= end; i++) {
+        if (!existingDDTs.has(i)) {
+            missingDDTs.push(i);
+        }
+    }
+    
+    return missingDDTs;
+}
+
+function updateDDTBadge(missingDDTs, rangeStart, rangeEnd) {
+    const badgeBtn = document.getElementById('ddtBadgeBtn');
+    const badgeBubble = document.getElementById('ddtBadgeBubble');
+    const badgeContent = document.getElementById('ddtBadgeContent');
+    
+    if (missingDDTs.length > 0) {
+        badgeBtn.classList.remove('hidden');
+        badgeContent.innerHTML = `
+            <p class="mb-2">Mancano ${missingDDTs.length} DDT nel range ${rangeStart}-${rangeEnd}:</p>
+            <div class="max-h-32 overflow-y-auto">
+                <p class="text-xs">${missingDDTs.join(', ')}</p>
+            </div>
+        `;
+    } else {
+        badgeBtn.classList.add('hidden');
+        badgeBubble.classList.add('hidden');
+    }
+}
+
+function closeDDTBubble() {
+    document.getElementById('ddtBadgeBubble').classList.add('hidden');
+}
+
+function checkDDTContinuity(newDDT) {
+    const baseDDT = extractBaseDDT(newDDT);
+    const range = getPreviousHundredRange(baseDDT);
+    
+    if (range.start >= 4200) { // Only check from 4200 onwards
+        const missingDDTs = checkMissingDDTsInRange(range.start, range.end);
+        updateDDTBadge(missingDDTs, range.start, range.end);
+    }
+}
+
+function deleteRate(provincia) {
+    if (confirm(`Sei sicuro di voler eliminare la tariffa ${provincia}?`)) {
+        delete tariffeProvinciali[provincia];
+        saveRates();
+        loadRatesTable();
+        populateProvinces(); // Update province dropdown
+        showNotification(`Tariffa ${provincia} eliminata con successo!`, 'success');
+    }
+}
+
+function addNewRate() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    
+    content.innerHTML = `
+        <form id="newRateForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuova Tariffa</h4>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Codice Provincia</label>
+                    <input type="text" id="newRateCodice" maxlength="2" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. MI">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Provincia</label>
+                    <input type="text" id="newRateNome" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. Milano">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Sigla</label>
+                    <input type="text" id="newRateSigla" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. MI">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Regione</label>
+                    <input type="text" id="newRateRegione" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. Lombardia">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 0-25kg</label>
+                    <input type="number" id="newRate0" step="0.001" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 26-50kg</label>
+                    <input type="number" id="newRate1" step="0.001" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 51-75kg</label>
+                    <input type="number" id="newRate2" step="0.001" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo 76-100kg</label>
+                    <input type="number" id="newRate3" step="0.001" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Costo >100kg</label>
+                    <input type="number" id="newRate4" step="0.001" required class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+            </div>
+            
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Tariffa
+                </button>
+            </div>
+        </form>
+    `;
+    
+    modal.classList.remove('hidden');
+    
+    document.getElementById('newRateForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewRate();
+    });
+}
+
+function saveNewRate() {
+    const codice = document.getElementById('newRateCodice').value.toUpperCase();
+    const nome = document.getElementById('newRateNome').value;
+    const sigla = document.getElementById('newRateSigla').value;
+    const regione = document.getElementById('newRateRegione').value;
+    const costi = [
+        parseFloat(document.getElementById('newRate0').value) || 0,
+        parseFloat(document.getElementById('newRate1').value) || 0,
+        parseFloat(document.getElementById('newRate2').value) || 0,
+        parseFloat(document.getElementById('newRate3').value) || 0,
+        parseFloat(document.getElementById('newRate4').value) || 0
+    ];
+    
+    tariffeProvinciali[codice] = {
+        nome: nome,
+        sigla: sigla,
+        regione: regione,
+        costi: costi
+    };
+    
+    saveRates();
+    closeRateModal();
+    loadRatesTable();
+    populateProvinces(); // Update province dropdown
+    showNotification(`Nuova tariffa ${codice} aggiunta con successo!`, 'success');
+}
+
+// Rules Management Functions
+function loadRulesTable() {
+    const tbody = document.getElementById('rulesTableBody');
+    tbody.innerHTML = '';
+    
+    Object.keys(regoleCalcolo).sort().forEach(nomeRegola => {
+        const dati = regoleCalcolo[nomeRegola];
+        if (dati) {
+            const row = document.createElement('tr');
+            row.className = 'editable-rate';
+            row.innerHTML = `
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${nomeRegola}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${dati.valore}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${dati.unita || '-'}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <button onclick="editRule('${nomeRegola}')" class="text-blue-600 hover:text-blue-800 mr-2">
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <button onclick="deleteRule('${nomeRegola}')" class="text-red-600 hover:text-red-800 mr-2">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        }
+    });
+}
+
+function editRule(nomeRegola) {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    const dati = regoleCalcolo[nomeRegola];
+    
+    if (!dati) return;
+    
+    content.innerHTML = `
+        <form id="ruleEditForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Modifica Regola: ${nomeRegola}</h4>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Nome Regola</label>
+                    <input type="text" value="${nomeRegola}" disabled class="w-full px-4 py-2 border border-gray-300 rounded-lg bg-gray-100">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Valore</label>
+                    <input type="text" id="editRuleValore" value="${dati.valore}" class="w-full px-4 py-2 border border-gray-300 rounded-lg">
+                </div>
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Unità di Misura</label>
+                    <input type="text" id="editRuleUnita" value="${dati.unita}" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. DEL NOLO, A SPEDIZIONE, OGNI 100 KG">
+                </div>
+            </div>
+            
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva Modifiche
+                </button>
+            </div>
+        </form>
+    `;
+    
+    modal.classList.remove('hidden');
+    
+    document.getElementById('ruleEditForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveRuleEdit(nomeRegola);
+    });
+}
+
+function saveRuleEdit(nomeRegola) {
+    regoleCalcolo[nomeRegola] = {
+        valore: document.getElementById('editRuleValore').value,
+        unita: document.getElementById('editRuleUnita').value
+    };
+    
+    saveRules();
+    closeRateModal();
+    loadRulesTable();
+    showNotification(`Regola ${nomeRegola} aggiornata con successo!`, 'success');
+}
+
+function deleteRule(nomeRegola) {
+    if (confirm(`Sei sicuro di voler eliminare la regola ${nomeRegola}?`)) {
+        delete regoleCalcolo[nomeRegola];
+        saveRules();
+        loadRulesTable();
+        showNotification(`Regola ${nomeRegola} eliminata con successo!`, 'success');
+    }
+}
+
+function addNewRule() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    
+    content.innerHTML = `
+        <form id="newRuleForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuova Regola</h4>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Nome Regola</label>
+                    <input type="text" id="newRuleNome" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. VIAGGIO ADR">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Valore</label>
+                    <input type="text" id="newRuleValore" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. 10% o 15">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Unità di Misura</label>
+                    <input type="text" id="newRuleUnita" class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. DEL NOLO, A SPEDIZIONE">
+                </div>
+            </div>
+            
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Regola
+                </button>
+            </div>
+        </form>
+    `;
+    
+    modal.classList.remove('hidden');
+    
+    document.getElementById('newRuleForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewRule();
+    });
+}
+
+function saveNewRule() {
+    const nome = document.getElementById('newRuleNome').value;
+    const valore = document.getElementById('newRuleValore').value;
+    const unita = document.getElementById('newRuleUnita').value;
+    
+    regoleCalcolo[nome] = {
+        valore: valore,
+        unita: unita
+    };
+    
+    saveRules();
+    closeRateModal();
+    loadRulesTable();
+    showNotification(`Nuova regola ${nome} aggiunta con successo!`, 'success');
+}
+
+function downloadRules() {
+    // Create CSV content
+    let csvContent = 'Nome Regola;Valore;Unità di Misura\n';
+
+    Object.keys(regoleCalcolo).sort().forEach(nomeRegola => {
+        const dati = regoleCalcolo[nomeRegola];
+        if (dati) {
+            csvContent += `${nomeRegola};${dati.valore};${dati.unita}\n`;
+        }
+    });
+    
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'regole_calcolo.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    showNotification('Regole CSV scaricate con successo!', 'success');
+}
+
+// CSV Upload Functions
+function handleFileSelect(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    
+    // Check if user is admin
+    if (!currentUser || currentUser.role !== 'admin') {
+        showNotification('Solo gli amministratori possono caricare file CSV', 'error');
+        return;
+    }
+    
+    document.getElementById('csvFileName').textContent = file.name;
+    processCSVFile(file);
+}
+
+function processCSVFile(file) {
+    const statusDiv = document.getElementById('csvUploadStatus');
+    const resultDiv = document.getElementById('csvUploadResult');
+    
+    // Show loading status
+    statusDiv.classList.remove('hidden');
+    resultDiv.classList.add('hidden');
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const csvData = parseCSV(e.target.result);
+            updateTariffeProvinciali(csvData);
+            
+            statusDiv.classList.add('hidden');
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = `
+                <div class="bg-green-50 border border-green-200 rounded-lg p-4">
+                    <div class="flex items-center">
+                        <i class="fas fa-check-circle text-green-600 mr-3"></i>
+                        <div>
+                            <p class="text-green-800 font-semibold">Caricamento completato con successo!</p>
+                            <p class="text-green-700 text-sm">Caricate ${csvData.length} province</p>
+                            <p class="text-green-600 text-xs mt-2">Le tariffe precedenti sono state sostituite completamente</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            // Update tables and dropdown
+            loadRatesTable();
+            populateProvinces();
+            showNotification('Tariffe aggiornate con successo!', 'success');
+        } catch (error) {
+            statusDiv.classList.add('hidden');
+            resultDiv.classList.remove('hidden');
+            resultDiv.innerHTML = `
+                <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                    <div class="flex items-center">
+                        <i class="fas fa-exclamation-circle text-red-600 mr-3"></i>
+                        <div>
+                            <p class="text-red-800 font-semibold">Errore durante il caricamento</p>
+                            <p class="text-red-700 text-sm">${error.message}</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            showNotification('Errore durante il caricamento del CSV', 'error');
+        }
+    };
+    
+    reader.onerror = function() {
+        statusDiv.classList.add('hidden');
+        resultDiv.classList.remove('hidden');
+        resultDiv.innerHTML = `
+            <div class="bg-red-50 border border-red-200 rounded-lg p-4">
+                <div class="flex items-center">
+                    <i class="fas fa-exclamation-circle text-red-600 mr-3"></i>
+                    <p class="text-red-800 font-semibold">Errore durante la lettura del file</p>
+                </div>
+            </div>
+        `;
+        
+        showNotification('Errore durante la lettura del file', 'error');
+    };
+    
+    reader.readAsText(file);
+}
+
+function parseCSV(csvText) {
+    const lines = csvText.split('\n').filter(line => line.trim());
+    
+    if (lines.length < 2) {
+        throw new Error('Il file CSV deve contenere almeno una riga di dati oltre all\'intestazione');
+    }
+    
+    // Auto-detect separator (comma or semicolon)
+    const firstLine = lines[0];
+    const separator = firstLine.includes(';') ? ';' : ',';
+    
+    const headers = firstLine.split(separator).map(h => h.trim());
+    const data = [];
+    const errors = [];
+    
+    // Check required headers
+    const requiredHeaders = ['Provincia', 'Sigla', 'Regione', 'Costo_0_25', 'Costo_26_50', 'Costo_51_75', 'Costo_76_100', 'Costo_oltre_100'];
+    const missingHeaders = requiredHeaders.filter(header => !headers.includes(header));
+    if (missingHeaders.length > 0) {
+        throw new Error(`Intestazioni mancanti: ${missingHeaders.join(', ')}`);
+    }
+    
+    for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        const values = line.split(separator).map(v => v.trim());
+        
+        if (values.length < 8) {
+            errors.push(`Riga ${i + 1}: numero di colonne insufficiente (${values.length}/8 richieste)`);
+            continue;
+        }
+        
+        const provincia = values[0];
+        const sigla = values[1];
+        const regione = values[2];
+        
+        if (!provincia || provincia.trim() === '') {
+            errors.push(`Riga ${i + 1}: provincia mancante`);
+            continue;
+        }
+        
+        if (!regione || regione.trim() === '') {
+            errors.push(`Riga ${i + 1}: regione mancante per provincia ${provincia}`);
+            continue;
+        }
+        
+        // Parse costs with better error handling
+        const costi = [];
+        for (let j = 3; j <= 7; j++) {
+            const value = values[j].replace(',', '.');
+            const parsed = parseFloat(value);
+            if (isNaN(parsed) || parsed < 0) {
+                errors.push(`Riga ${i + 1}: costo non valido alla colonna ${j} (${values[j]})`);
+                costi.push(0);
+            } else {
+                costi.push(parsed);
+            }
+        }
+        
+        data.push({
+            provincia: provincia,
+            sigla: sigla,
+            regione: regione,
+            costi: costi
+        });
+    }
+    
+    if (errors.length > 0) {
+        console.log('CSV Parsing Errors:', errors);
+        // Show errors in notification but continue with valid data
+        showNotification(`Attenzione: ${errors.length} errori nel CSV. Caricate ${data.length} province valide.`, 'warning');
+    }
+    
+    if (data.length === 0) {
+        throw new Error('Nessun dato valido trovato nel file CSV');
+    }
     
     return data;
 }
 
-// Get color based on pallet dimensions
-function getColorForPallet(length, width, height) {
-    // Create a hash of the dimensions
-    const dimensions = `${length.toFixed(2)}x${width.toFixed(2)}x${height.toFixed(2)}`;
-    let hash = 0;
-    for (let i = 0; i < dimensions.length; i++) {
-        hash = dimensions.charCodeAt(i) + ((hash << 5) - hash);
-    }
+function updateTariffeProvinciali(csvData) {
+    // Clear existing rates and replace with CSV data
+    tariffeProvinciali = {};
     
-    // Use the hash to select a color from the palette
-    const colorIndex = Math.abs(hash) % COLOR_PALETTE.length;
-    return COLOR_PALETTE[colorIndex];
-}
-
-// 3D Bin Packing Algorithm
-function packPallets(palletData, respectWarehouseOrder = false) {
-    // Sort pallets by base area (larger first) for better packing
-    const sortedPallets = [...palletData].sort((a, b) => {
-        const areaA = a.length * a.width;
-        const areaB = b.length * b.width;
-        return areaB - areaA;
-    });
-    
-    // If respecting warehouse order, sort by warehouse first
-    if (respectWarehouseOrder) {
-        sortedPallets.sort((a, b) => {
-            if (a.warehouseId !== b.warehouseId) {
-                return a.warehouseId - b.warehouseId;
-            }
-            // Within same warehouse, sort by area
-            const areaA = a.length * a.width;
-            const areaB = b.length * b.width;
-            return areaB - areaA;
-        });
-    }
-    
-    const placedPallets = [];
-    const unplacedPallets = [];
-    
-    // Create a 3D grid representation of the truck
-    const cellSize = 0.1; // 10cm resolution (faster, less precise)
-    const gridLength = Math.ceil(TRUCK_LENGTH / cellSize);
-    const gridWidth = Math.ceil(TRUCK_WIDTH / cellSize);
-    const gridHeight = Math.ceil(TRUCK_HEIGHT / cellSize);
-    
-    // 3D array to track occupied space
-    const occupied = Array(gridHeight).fill(null).map(() => 
-        Array(gridWidth).fill(null).map(() => 
-            Array(gridLength).fill(false)
-        )
-    );
-    
-    // Track which warehouse occupies which section of the truck
-    const warehouseSections = {};
-    
-    // Function to check if a position is valid
-    function canPlace(pallet, x, y, z, rotated) {
-        const pLength = rotated ? pallet.width : pallet.length;
-        const pWidth = rotated ? pallet.length : pallet.width;
-        const pHeight = pallet.height;
-        
-        const startL = Math.floor(x / cellSize);
-        const startW = Math.floor(y / cellSize);
-        const startH = Math.floor(z / cellSize);
-        const endL = Math.ceil((x + pLength) / cellSize);
-        const endW = Math.ceil((y + pWidth) / cellSize);
-        const endH = Math.ceil((z + pHeight) / cellSize);
-        
-        // Check bounds
-        if (x + pLength > TRUCK_LENGTH || y + pWidth > TRUCK_WIDTH || z + pHeight > TRUCK_HEIGHT) {
-            return false;
-        }
-        
-        // Check if space is occupied
-        for (let h = startH; h < endH; h++) {
-            for (let w = startW; w < endW; w++) {
-                for (let l = startL; l < endL; l++) {
-                    if (occupied[h][w][l]) {
-                        return false;
-                    }
-                }
-            }
-        }
-        
-        // If respecting warehouse order, check if this section is already occupied by a different warehouse
-        if (respectWarehouseOrder) {
-            const midX = x + pLength / 2;
-            for (const whId in warehouseSections) {
-                if (whId !== String(pallet.warehouseId)) {
-                    const section = warehouseSections[whId];
-                    if (midX >= section.start && midX <= section.end) {
-                        return false; // Would overlap with different warehouse
-                    }
-                }
-            }
-        }
-        
-        return true;
-    }
-    
-    // Function to mark space as occupied
-    function markOccupied(pallet, x, y, z, rotated) {
-        const pLength = rotated ? pallet.width : pallet.length;
-        const pWidth = rotated ? pallet.length : pallet.width;
-        const pHeight = pallet.height;
-        
-        const startL = Math.floor(x / cellSize);
-        const startW = Math.floor(y / cellSize);
-        const startH = Math.floor(z / cellSize);
-        const endL = Math.ceil((x + pLength) / cellSize);
-        const endW = Math.ceil((y + pWidth) / cellSize);
-        const endH = Math.ceil((z + pHeight) / cellSize);
-        
-        for (let h = startH; h < endH; h++) {
-            for (let w = startW; w < endW; w++) {
-                for (let l = startL; l < endL; l++) {
-                    occupied[h][w][l] = true;
-                }
-            }
-        }
-        
-        // Track warehouse section
-        if (respectWarehouseOrder) {
-            const whId = String(pallet.warehouseId);
-            if (!warehouseSections[whId]) {
-                warehouseSections[whId] = { start: x, end: x + pLength };
-            } else {
-                warehouseSections[whId].end = Math.max(warehouseSections[whId].end, x + pLength);
-            }
-        }
-    }
-    
-    // Try to place each pallet with orientation optimization
-    for (const pallet of sortedPallets) {
-        let placed = false;
-        let bestPosition = null;
-        let bestOrientation = false;
-        let bestLinearPosition = Infinity;
-        let bestStackLevel = 0; // Prefer stacking to save space
-        
-        // For warehouse order, constrain placement to warehouse section
-        let minX = 0;
-        let maxX = TRUCK_LENGTH;
-        
-        if (respectWarehouseOrder && warehouseSections[String(pallet.warehouseId)]) {
-            minX = warehouseSections[String(pallet.warehouseId)].start;
-            maxX = warehouseSections[String(pallet.warehouseId)].end;
-        }
-        
-        // Try both orientations and find the one that minimizes linear space
-        for (const rotated of [false, true]) {
-            const pLength = rotated ? pallet.width : pallet.length;
-            
-            // PRIORITY 1: If stackable, try to place on top of other pallets from SAME warehouse
-            if (pallet.stackable) {
-                for (const placedPallet of placedPallets) {
-                    // Only stack on pallets from same warehouse
-                    if (String(placedPallet.warehouseId) !== String(pallet.warehouseId)) continue;
-                    
-                    const topZ = placedPallet.z + placedPallet.height;
-                    
-                    // Check if stacking would exceed height limit
-                    if (topZ + pallet.height > TRUCK_HEIGHT) continue;
-                    
-                    // Check if pallet dimensions are IDENTICAL for stacking
-                    const placedLength = placedPallet.rotated ? placedPallet.width : placedPallet.length;
-                    const placedWidth = placedPallet.rotated ? placedPallet.length : placedPallet.width;
-                    
-                    const palletLengthForCheck = rotated ? pallet.width : pallet.length;
-                    const palletWidthForCheck = rotated ? pallet.length : pallet.width;
-                    
-                    // Top pallet must have IDENTICAL dimensions to bottom pallet
-                    if (Math.abs(palletLengthForCheck - placedLength) > 0.01 || Math.abs(palletWidthForCheck - placedWidth) > 0.01) continue;
-                    
-                    for (let x = placedPallet.x; x <= placedPallet.x + placedLength - pLength; x += cellSize) {
-                        for (let y = placedPallet.y; y <= placedPallet.y + placedWidth - (rotated ? pallet.length : pallet.width); y += cellSize) {
-                            if (canPlace(pallet, x, y, topZ, rotated)) {
-                                const linearPosition = x + pLength;
-                                const stackLevel = Math.floor(topZ / pallet.height);
-                                // PRIORITY: Stacking always beats floor placement
-                                if (stackLevel > bestStackLevel || (stackLevel === bestStackLevel && linearPosition < bestLinearPosition)) {
-                                    bestLinearPosition = linearPosition;
-                                    bestPosition = { x, y, z: topZ };
-                                    bestOrientation = rotated;
-                                    bestStackLevel = stackLevel;
-                                    placed = true;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // PRIORITY 2: Try to place at the bottom (z=0) - only if no stacking found
-            if (bestStackLevel === 0) {
-                for (let x = minX; x <= maxX - pLength; x += cellSize) {
-                    for (let y = 0; y <= TRUCK_WIDTH - (rotated ? pallet.length : pallet.width); y += cellSize) {
-                        if (canPlace(pallet, x, y, 0, rotated)) {
-                            const linearPosition = x + pLength;
-                            if (linearPosition < bestLinearPosition) {
-                                bestLinearPosition = linearPosition;
-                                bestPosition = { x, y, z: 0 };
-                                bestOrientation = rotated;
-                                bestStackLevel = 0;
-                                placed = true;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        
-        if (placed && bestPosition) {
-            markOccupied(pallet, bestPosition.x, bestPosition.y, bestPosition.z, bestOrientation);
-            placedPallets.push({
-                ...pallet,
-                x: bestPosition.x,
-                y: bestPosition.y,
-                z: bestPosition.z,
-                rotated: bestOrientation
-            });
-        } else {
-            unplacedPallets.push(pallet);
-        }
-    }
-    
-    return { placedPallets, unplacedPallets };
-}
-
-// Initialize Three.js
-function initThreeJS() {
-    const container = document.getElementById('threeContainer');
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-    
-    // Scene
-    scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x1e293b);
-    
-    // Camera
-    camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-    camera.position.set(20, 15, 20);
-    
-    // Renderer
-    renderer = new THREE.WebGLRenderer({ antialias: true });
-    renderer.setSize(width, height);
-    renderer.shadowMap.enabled = true;
-    container.appendChild(renderer.domElement);
-    
-    // Controls
-    controls = new THREE.OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.05;
-    controls.enablePan = true;
-    controls.maxPolarAngle = Math.PI / 2; // Prevent going below ground
-    
-    // Raycaster for click detection
-    raycaster = new THREE.Raycaster();
-    mouse = new THREE.Vector2();
-    
-    // Click handler
-    renderer.domElement.addEventListener('click', onMouseClick, false);
-    
-    // Keyboard shortcuts for navigation
-    document.addEventListener('keydown', onKeyDown);
-    
-    // Lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
-    scene.add(ambientLight);
-    
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(20, 30, 20);
-    directionalLight.castShadow = true;
-    scene.add(directionalLight);
-    
-    // Animation loop
-    function animate() {
-        requestAnimationFrame(animate);
-        controls.update();
-        renderer.render(scene, camera);
-    }
-    animate();
-    
-    // Handle resize
-    window.addEventListener('resize', () => {
-        const newWidth = container.clientWidth;
-        const newHeight = container.clientHeight;
-        camera.aspect = newWidth / newHeight;
-        camera.updateProjectionMatrix();
-        renderer.setSize(newWidth, newHeight);
-    });
-}
-
-// Handle mouse click on pallets
-function onMouseClick(event) {
-    const container = document.getElementById('threeContainer');
-    const rect = renderer.domElement.getBoundingClientRect();
-    
-    mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-    mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-    
-    raycaster.setFromCamera(mouse, camera);
-    
-    // Get all pallet meshes
-    const palletMeshesOnly = palletMeshes.filter(mesh => mesh.isMesh);
-    const intersects = raycaster.intersectObjects(palletMeshesOnly);
-    
-    // Remove previous selection highlight
-    if (selectedPallet) {
-        selectedPallet.material.emissive.setHex(0x000000);
-    }
-    
-    if (intersects.length > 0) {
-        const clickedMesh = intersects[0].object;
-        selectedPallet = clickedMesh;
-        
-        // Highlight selected pallet
-        clickedMesh.material.emissive.setHex(0x333333);
-        
-        // Show dimensions in UI
-        const palletData = clickedMesh.userData;
-        if (palletData) {
-            const dimensions = `${palletData.length.toFixed(2)}m × ${palletData.width.toFixed(2)}m × ${palletData.height.toFixed(2)}m`;
-            const weight = `${palletData.totalWeight.toFixed(1)}kg`;
-            const warehouse = palletData.warehouseName || '';
-            
-            alert(`📦 Pallet Selezionato\n\nDimensioni: ${dimensions}\nPeso: ${weight}\nMagazzino: ${warehouse}`);
-        }
-    } else {
-        selectedPallet = null;
-    }
-}
-
-// Handle keyboard navigation
-function onKeyDown(event) {
-    if (!window.truckPositions || window.truckPositions.length === 0) return;
-    
-    const spacing = TRUCK_LENGTH + 5;
-    
-    switch(event.key) {
-        case 'ArrowLeft':
-            // Move camera to previous truck
-            const currentX = controls.target.x;
-            const currentIndex = window.truckPositions.findIndex(t => Math.abs(t.x - currentX) < spacing / 2);
-            
-            if (currentIndex > 0) {
-                const prevTruck = window.truckPositions[currentIndex - 1];
-                animateCameraTo(prevTruck.x);
-            }
-            break;
-            
-        case 'ArrowRight':
-            // Move camera to next truck
-            const currentX2 = controls.target.x;
-            const currentIndex2 = window.truckPositions.findIndex(t => Math.abs(t.x - currentX2) < spacing / 2);
-            
-            if (currentIndex2 < window.truckPositions.length - 1) {
-                const nextTruck = window.truckPositions[currentIndex2 + 1];
-                animateCameraTo(nextTruck.x);
-            }
-            break;
-            
-        case 'Home':
-            // Reset to overview
-            const totalWidth = window.truckPositions.length * spacing;
-            animateCameraTo(totalWidth / 2, true);
-            break;
-    }
-}
-
-// Animate camera to position
-function animateCameraTo(targetX, isOverview = false) {
-    const startY = camera.position.y;
-    const startZ = camera.position.z;
-    const targetY = isOverview ? 25 : 15;
-    const targetZ = isOverview ? 30 : 20;
-    
-    const duration = 500;
-    const startTime = Date.now();
-    
-    function animate() {
-        const elapsed = Date.now() - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-        
-        // Ease function
-        const ease = t => t * (2 - t);
-        const easedProgress = ease(progress);
-        
-        camera.position.x = targetX + 10;
-        camera.position.y = startY + (targetY - startY) * easedProgress;
-        camera.position.z = startZ + (targetZ - startZ) * easedProgress;
-        
-        controls.target.set(targetX, TRUCK_HEIGHT / 2, TRUCK_WIDTH / 2);
-        controls.update();
-        
-        if (progress < 1) {
-            requestAnimationFrame(animate);
-        }
-    }
-    
-    animate();
-}
-
-// Clear all objects from scene
-function clearScene() {
-    const objectsToRemove = [];
-    scene.traverse((child) => {
-        if (child.isMesh || child.isLineSegments) {
-            objectsToRemove.push(child);
+    csvData.forEach(row => {
+        if (row.provincia && row.costi) {
+            tariffeProvinciali[row.provincia] = {
+                nome: row.provincia,
+                sigla: row.sigla || '',
+                regione: row.regione || '',
+                costi: row.costi
+            };
         }
     });
-    objectsToRemove.forEach(obj => {
-        scene.remove(obj);
-        if (obj.geometry) obj.geometry.dispose();
-        if (obj.material) obj.material.dispose();
-    });
     
-    truckMeshes = [];
-    palletMeshes = [];
+    saveRates();
 }
 
-// Draw a truck bed at a specific position
-function drawTruckBed(positionX, offsetY, label, linearMeters) {
-    const group = new THREE.Group();
+function downloadCurrentRates() {
+    // Create CSV content
+    let csvContent = 'Provincia,Sigla,Regione,Costo_0_25,Costo_26_50,Costo_51_75,Costo_76_100,Costo_oltre_100\n';
     
-    // Truck bed (wireframe)
-    const geometry = new THREE.BoxGeometry(TRUCK_LENGTH, TRUCK_HEIGHT, TRUCK_WIDTH);
-    const edges = new THREE.EdgesGeometry(geometry);
-    const material = new THREE.LineBasicMaterial({ color: 0x3b82f6, linewidth: 2 });
-    const truckMesh = new THREE.LineSegments(edges, material);
-    truckMesh.position.set(TRUCK_LENGTH / 2, TRUCK_HEIGHT / 2, TRUCK_WIDTH / 2);
-    group.add(truckMesh);
-    
-    // Floor
-    const floorGeometry = new THREE.PlaneGeometry(TRUCK_LENGTH, TRUCK_WIDTH);
-    const floorMaterial = new THREE.MeshBasicMaterial({ 
-        color: 0x374151, 
-        side: THREE.DoubleSide,
-        transparent: true,
-        opacity: 0.3
-    });
-    const floor = new THREE.Mesh(floorGeometry, floorMaterial);
-    floor.rotation.x = -Math.PI / 2;
-    floor.position.set(TRUCK_LENGTH / 2, 0, TRUCK_WIDTH / 2);
-    group.add(floor);
-    
-    // Grid helper
-    const gridHelper = new THREE.GridHelper(TRUCK_LENGTH, 20, 0x4b5563, 0x4b5563);
-    gridHelper.position.set(TRUCK_LENGTH / 2, 0, TRUCK_WIDTH / 2);
-    group.add(gridHelper);
-    
-    // Add warehouse label
-    const canvas = document.createElement('canvas');
-    const context = canvas.getContext('2d');
-    canvas.width = 256;
-    canvas.height = 64;
-    context.fillStyle = 'white';
-    context.font = 'bold 32px Arial';
-    context.textAlign = 'center';
-    context.fillText(label, 128, 40);
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    const spriteMaterial = new THREE.SpriteMaterial({ map: texture });
-    const sprite = new THREE.Sprite(spriteMaterial);
-    sprite.position.set(TRUCK_LENGTH / 2, TRUCK_HEIGHT + 1, TRUCK_WIDTH / 2);
-    sprite.scale.set(4, 1, 1);
-    group.add(sprite);
-    
-    // Add linear meters label
-    const linearCanvas = document.createElement('canvas');
-    const linearContext = linearCanvas.getContext('2d');
-    linearCanvas.width = 256;
-    linearCanvas.height = 64;
-    linearContext.fillStyle = 'rgba(255, 255, 255, 0.9)';
-    linearContext.fillRect(0, 0, 256, 64);
-    linearContext.fillStyle = '#10b981';
-    linearContext.font = 'bold 28px Arial';
-    linearContext.textAlign = 'center';
-    linearContext.fillText(`📏 ${linearMeters.toFixed(1)}m lineari`, 128, 40);
-    
-    const linearTexture = new THREE.CanvasTexture(linearCanvas);
-    const linearSpriteMaterial = new THREE.SpriteMaterial({ map: linearTexture });
-    const linearSprite = new THREE.Sprite(linearSpriteMaterial);
-    linearSprite.position.set(TRUCK_LENGTH / 2, TRUCK_HEIGHT + 2.5, TRUCK_WIDTH / 2);
-    linearSprite.scale.set(4, 1, 1);
-    group.add(linearSprite);
-    
-    group.position.set(positionX, offsetY, 0);
-    scene.add(group);
-    truckMeshes.push(group);
-    
-    return group;
-}
-
-// Draw a pallet without dimensions label
-function drawPallet(pallet, index, offset) {
-    const geometry = new THREE.BoxGeometry(
-        pallet.rotated ? pallet.width : pallet.length,
-        pallet.height,
-        pallet.rotated ? pallet.length : pallet.width
-    );
-    
-    const color = getColorForPallet(pallet.length, pallet.width, pallet.height);
-    
-    const material = new THREE.MeshPhongMaterial({ 
-        color: color,
-        transparent: true,
-        opacity: 0.8
-    });
-    
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.position.set(
-        offset.x + pallet.x + (pallet.rotated ? pallet.width : pallet.length) / 2,
-        offset.y + pallet.z + pallet.height / 2,
-        pallet.y + (pallet.rotated ? pallet.length : pallet.width) / 2
-    );
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    
-    // Store pallet data for click detection
-    mesh.userData = {
-        length: pallet.length,
-        width: pallet.width,
-        height: pallet.height,
-        weight: pallet.weight,
-        totalWeight: pallet.totalWeight || pallet.weight,
-        warehouseName: pallet.warehouseName
-    };
-    
-    scene.add(mesh);
-    palletMeshes.push(mesh);
-    
-    // Add edges
-    const edges = new THREE.EdgesGeometry(geometry);
-    const edgeMaterial = new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1 });
-    const edgeMesh = new THREE.LineSegments(edges, edgeMaterial);
-    edgeMesh.position.copy(mesh.position);
-    scene.add(edgeMesh);
-    palletMeshes.push(edgeMesh);
-}
-
-// Main optimization and visualization function
-function optimizeAndVisualize() {
-    // Clear all state to ensure fresh calculation
-    clearScene();
-    window.combinations = null;
-    previousMultiView = null;
-    window.truckPositions = null;
-    
-    const palletData = collectAllPalletData();
-    
-    if (palletData.length === 0) {
-        alert('Inserisci almeno un pallet valido');
-        return;
-    }
-    
-    // Show loading indicator
-    const resultsDiv = document.getElementById('results');
-    const resultsContent = document.getElementById('resultsContent');
-    resultsDiv.classList.remove('hidden');
-    resultsContent.innerHTML = '<p class="text-yellow-300">⏳ Ottimizzazione in corso...</p>';
-    
-    // Use setTimeout to allow UI to update
-    setTimeout(() => {
-        try {
-            // Group pallets by warehouse
-            const palletsByWarehouse = {};
-            palletData.forEach(p => {
-                if (!palletsByWarehouse[p.warehouseId]) {
-                    palletsByWarehouse[p.warehouseId] = [];
-                }
-                palletsByWarehouse[p.warehouseId].push(p);
-            });
-            
-            // Draw each warehouse on a separate truck
-            let offsetX = 0;
-            const spacing = TRUCK_LENGTH + 5;
-            
-            Object.keys(palletsByWarehouse).forEach((warehouseId, index) => {
-                const warehousePallets = palletsByWarehouse[warehouseId];
-                const warehouseName = warehouses.find(w => w.id === parseInt(warehouseId))?.name || `M${warehouseId}`;
-                
-                // Draw truck bed
-                const truckOffset = { x: offsetX, y: 0 };
-                
-                // Run packing algorithm for this warehouse
-                const { placedPallets, unplacedPallets } = packPallets(warehousePallets);
-                
-                // Calculate linear meters occupied
-                let maxLinearMeter = 0;
-                placedPallets.forEach(p => {
-                    const endPosition = p.x + (p.rotated ? p.width : p.length);
-                    if (endPosition > maxLinearMeter) {
-                        maxLinearMeter = endPosition;
-                    }
-                });
-                
-                drawTruckBed(offsetX, 0, `🏭 ${warehouseName}`, maxLinearMeter);
-                
-                // Draw placed pallets
-                placedPallets.forEach((pallet, i) => {
-                    drawPallet(pallet, i, truckOffset);
-                });
-                
-                offsetX += spacing;
-            });
-            
-            // Adjust camera to see all trucks
-            const numTrucks = Object.keys(palletsByWarehouse).length;
-            const totalWidth = numTrucks * spacing;
-            
-            // Better camera positioning for multiple trucks
-            camera.position.set(totalWidth / 2, 25, 30);
-            controls.target.set(totalWidth / 2, TRUCK_HEIGHT / 2, TRUCK_WIDTH / 2);
-            controls.update();
-            
-            // Store truck positions for quick navigation
-            window.truckPositions = [];
-            Object.keys(palletsByWarehouse).forEach((warehouseId, index) => {
-                window.truckPositions.push({
-                    x: index * spacing + TRUCK_LENGTH / 2,
-                    name: warehouses.find(w => w.id === parseInt(warehouseId))?.name || `M${warehouseId}`
-                });
-            });
-            
-            // Display results
-            displayResults(palletData);
-        } catch (error) {
-            console.error('Error optimizing:', error);
-            resultsContent.innerHTML = '<p class="text-red-300">Errore nell\'ottimizzazione.</p>';
+    Object.keys(tariffeProvinciali).sort().forEach(provincia => {
+        const dati = tariffeProvinciali[provincia];
+        if (dati) {
+            csvContent += `${provincia},${dati.sigla || ''},${dati.regione},${dati.costi[0]},${dati.costi[1]},${dati.costi[2]},${dati.costi[3]},${dati.costi[4]}\n`;
         }
-    }, 10);
-}
-
-// Display results
-function displayResults(palletData) {
-    const resultsDiv = document.getElementById('results');
-    const resultsContent = document.getElementById('resultsContent');
-    const errorsDiv = document.getElementById('errors');
-    const errorsContent = document.getElementById('errorsContent');
-    
-    resultsDiv.classList.remove('hidden');
-    errorsDiv.classList.add('hidden');
-    
-    // Check if this is a combination (no warehouse grouping)
-    const hasWarehouses = palletData.some(p => p.warehouseName);
-    
-    if (!hasWarehouses) {
-        // Single combined truck view
-        const totalWeight = palletData.reduce((sum, p) => sum + p.weight, 0);
-        const totalVolume = palletData.reduce((sum, p) => sum + p.length * p.width * p.height, 0);
-        
-        resultsContent.innerHTML = `
-            <p><strong>Totale combinato:</strong> ${palletData.length} pallet, ${(totalWeight / 1000).toFixed(2)}t, ${totalVolume.toFixed(2)}m³</p>
-        `;
-        return;
-    }
-    
-    // Group by warehouse
-    const byWarehouse = {};
-    palletData.forEach(p => {
-        if (!byWarehouse[p.warehouseName]) {
-            byWarehouse[p.warehouseName] = [];
-        }
-        byWarehouse[p.warehouseName].push(p);
     });
     
-    let resultsHTML = '';
-    Object.keys(byWarehouse).forEach(warehouseName => {
-        const pallets = byWarehouse[warehouseName];
-        
-        // Use totalWeight to avoid double counting for multiple pallets of same type
-        const uniqueRows = new Set();
-        const totalWeight = pallets.reduce((sum, p) => {
-            const rowKey = `${p.warehouseId}-${p.id.split('-')[1]}`;
-            if (!uniqueRows.has(rowKey)) {
-                uniqueRows.add(rowKey);
-                return sum + (p.totalWeight || p.weight);
-            }
-            return sum;
-        }, 0);
-        
-        const totalVolume = pallets.reduce((sum, p) => sum + p.length * p.width * p.height, 0);
-        
-        resultsHTML += `
-            <p><strong>${warehouseName}:</strong> ${pallets.length} pallet, ${(totalWeight / 1000).toFixed(2)}t, ${totalVolume.toFixed(2)}m³</p>
-        `;
-    });
+    // Create download link
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tariffe_provinciali.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
     
-    resultsContent.innerHTML = resultsHTML;
+    showNotification('CSV scaricato con successo!', 'success');
 }
 
-// Generate combinations for optimal transport
-async function generateCombinations() {
-    const palletData = collectAllPalletData();
+function downloadTemplate() {
+    // Create template CSV content with more examples
+    const templateContent = 'Provincia,Sigla,Regione,Costo_0_25,Costo_26_50,Costo_51_75,Costo_76_100,Costo_oltre_100\n';
+    templateContent += 'MI,MI,Lombardia,6.996,9.515,12.342,14.586,14.586\n';
+    templateContent += 'RM,RM,Lazio,8.206,10.791,13.376,15.972,15.972\n';
+    templateContent += 'NA,NA,Campania,10.373,12.914,15.444,17.985,17.985\n';
+    templateContent += 'TO,TO,Piemonte,6.303,8.822,11.605,13.893,13.893\n';
+    templateContent += 'GE,GE,Liguria,13.963,17.989,22.301,25.997,25.997\n';
+    templateContent += 'BO,BO,Emilia-Romagna,8.206,10.791,13.376,15.972,15.972\n';
+    templateContent += 'FI,FI,Toscana,8.206,10.791,13.376,15.972,15.972\n';
+    templateContent += 'VE,VE,Veneto,7.37,10.703,14.311,17.402,17.402\n';
+    templateContent += 'BA,BA,Puglia,10.373,12.914,15.444,17.985,17.985\n';
+    templateContent += 'CA,CA,Sardegna,11.473,17.975,24.477,30.979,30.979\n';
+    templateContent += 'PA,PA,Sicilia,10.373,12.914,15.444,17.985,17.985\n';
+    templateContent += 'AN,AN,Marche,20.889,20.889,20.889,20.889,20.889\n';
+    templateContent += 'AQ,AQ,Abruzzo,8.206,10.791,13.376,15.972,15.972\n';
+    templateContent += 'TN,TN,Trentino-Alto Adige,9.361,12.045,14.729,17.413,17.413\n';
+    templateContent += 'PZ,PZ,Basilicata,11.473,17.975,24.477,30.979,30.979\n';
     
-    if (palletData.length === 0) {
-        alert('Inserisci almeno un pallet valido');
-        return;
-    }
+    // Create download link
+    const blob = new Blob([templateContent], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'template_tariffe.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
     
-    if (warehouses.length < 2) {
-        alert('Devi avere almeno 2 magazzini per generare combinazioni');
-        return;
-    }
-    
-    // Clear scene immediately to free memory
-    clearScene();
-    window.combinations = null;
-    previousMultiView = null;
-    
-    // Show loading indicator
-    const resultsDiv = document.getElementById('results');
-    const resultsContent = document.getElementById('resultsContent');
-    resultsDiv.classList.remove('hidden');
-    resultsContent.innerHTML = '<p class="text-yellow-300">⏳ Calcolo combinazioni in corso...</p>';
-    
-    // Use setTimeout to allow UI to update before heavy computation
-    setTimeout(() => {
-        try {
-            // Group pallets by warehouse
-            const palletsByWarehouse = {};
-            palletData.forEach(p => {
-                if (!palletsByWarehouse[p.warehouseId]) {
-                    palletsByWarehouse[p.warehouseId] = [];
-                }
-                palletsByWarehouse[p.warehouseId].push(p);
-            });
-            
-            const warehouseIds = Object.keys(palletsByWarehouse);
-            const combinations = [];
-            
-            // Step 1: Calculate linear meters for each warehouse (when optimized individually)
-            const warehouseLinearMeters = {};
-            warehouseIds.forEach(whId => {
-                const whPallets = palletsByWarehouse[whId];
-                const { placedPallets } = packPallets(whPallets, false);
-                
-                const maxLinearMeter = placedPallets.reduce((max, p) => {
-                    const endPosition = p.x + (p.rotated ? p.width : p.length);
-                    return Math.max(max, endPosition);
-                }, 0);
-                
-                warehouseLinearMeters[whId] = maxLinearMeter;
-            });
-            
-            // Step 2: Use bin packing to minimize number of trucks
-            // Each warehouse must be loaded completely in one truck
-            const truckCapacity = TRUCK_LENGTH; // 13.6m
-            
-            // Sort warehouses by linear meters (largest first) - First Fit Decreasing
-            const sortedWarehouseIds = [...warehouseIds].sort((a, b) => warehouseLinearMeters[b] - warehouseLinearMeters[a]);
-            
-            // Try different numbers of trucks and find the minimum that works
-            let minTrucks = warehouseIds.length; // Start with worst case (each warehouse in its own truck)
-            
-            for (let numTrucks = 1; numTrucks <= warehouseIds.length; numTrucks++) {
-                // Initialize trucks
-                const trucks = Array.from({ length: numTrucks }, () => ({
-                    warehouseIds: [],
-                    linearMeters: 0
-                }));
-                
-                // Assign warehouses to trucks using First Fit
-                let allFit = true;
-                
-                for (const whId of sortedWarehouseIds) {
-                    const whLinearMeters = warehouseLinearMeters[whId];
-                    let assigned = false;
-                    
-                    // Try to fit in each truck
-                    for (let t = 0; t < numTrucks; t++) {
-                        if (trucks[t].linearMeters + whLinearMeters <= truckCapacity) {
-                            trucks[t].warehouseIds.push(whId);
-                            trucks[t].linearMeters += whLinearMeters;
-                            assigned = true;
-                            break;
-                        }
-                    }
-                    
-                    if (!assigned) {
-                        allFit = false;
-                        break;
-                    }
-                }
-                
-                if (allFit) {
-                    minTrucks = numTrucks;
-                    break;
-                }
-            }
-            
-            // Now find all valid solutions with minTrucks trucks
-            // Try all combinations using backtracking (limited to avoid explosion)
-            const validSolutions = [];
-            
-            function backtrack(index, currentTrucks) {
-                if (index === sortedWarehouseIds.length) {
-                    // All warehouses assigned
-                    validSolutions.push([...currentTrucks]);
-                    return;
-                }
-                
-                const whId = sortedWarehouseIds[index];
-                const whLinearMeters = warehouseLinearMeters[whId];
-                
-                for (let t = 0; t < minTrucks; t++) {
-                    if (currentTrucks[t].linearMeters + whLinearMeters <= truckCapacity) {
-                        currentTrucks[t].warehouseIds.push(whId);
-                        currentTrucks[t].linearMeters += whLinearMeters;
-                        backtrack(index + 1, currentTrucks);
-                        currentTrucks[t].warehouseIds.pop();
-                        currentTrucks[t].linearMeters -= whLinearMeters;
-                    }
-                }
-            }
-            
-            const initialTrucks = Array.from({ length: minTrucks }, () => ({
-                warehouseIds: [],
-                linearMeters: 0
-            }));
-            
-            backtrack(0, initialTrucks);
-            
-            // Remove duplicate solutions and build combinations
-            const uniqueSolutions = [];
-            const seen = new Set();
-            
-            validSolutions.forEach(solution => {
-                const key = solution.map(t => t.warehouseIds.sort().join(',')).join('|');
-                if (!seen.has(key)) {
-                    seen.add(key);
-                    uniqueSolutions.push(solution);
-                }
-            });
-            
-            // Build combination objects
-            uniqueSolutions.forEach(solution => {
-                const trucks = solution.map(truck => {
-                    const whNames = truck.warehouseIds.map(id =>
-                        warehouses.find(w => w.id === parseInt(id))?.name || `M${id}`
-                    ).join(' + ');
-                    
-                    const combinedPallets = truck.warehouseIds.map(id => palletsByWarehouse[id]).flat();
-                    const uniqueRows = new Set();
-                    const totalWeight = combinedPallets.reduce((sum, p) => {
-                        const rowKey = `${p.warehouseId}-${p.id.split('-')[1]}`;
-                        if (!uniqueRows.has(rowKey)) {
-                            uniqueRows.add(rowKey);
-                            return sum + (p.totalWeight || p.weight);
-                        }
-                        return sum;
-                    }, 0);
-                    
-                    return {
-                        warehouses: whNames,
-                        warehouseIds: truck.warehouseIds,
-                        pallets: combinedPallets.length,
-                        linearMeters: truck.linearMeters,
-                        totalWeight: totalWeight
-                    };
-                });
-                
-                const totalPallets = trucks.reduce((sum, t) => sum + t.pallets, 0);
-                
-                combinations.push({
-                    type: 'multi',
-                    trucks: trucks,
-                    numTrucks: minTrucks,
-                    totalPallets: totalPallets
-                });
-            });
-            
-            // Sort by linear meters utilization (more balanced is better)
-            combinations.sort((a, b) => {
-                const aMax = Math.max(...a.trucks.map(t => t.linearMeters));
-                const bMax = Math.max(...b.trucks.map(t => t.linearMeters));
-                return aMax - bMax;
-            });
-            
-            // Display results
-            displayCombinations(combinations);
-        } catch (error) {
-            console.error('Error generating combinations:', error);
-            resultsContent.innerHTML = '<p class="text-red-300">Errore nel calcolo delle combinazioni.</p>';
-        }
-    }, 10);
+    showNotification('Template CSV scaricato con successo!', 'success');
 }
 
-// Get all combinations of size k from array
-function getCombinations(arr, k) {
-    const result = [];
-    
-    function combine(start, combo) {
-        if (combo.length === k) {
-            result.push([...combo]);
+// User Management Functions
+async function loadUsersTable() {
+    const tbody = document.getElementById('usersTableBody');
+    tbody.innerHTML = '';
+
+    try {
+        // Load users from Firestore
+        const snapshot = await db.collection('users').get();
+
+        if (snapshot.empty) {
+            tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Nessun utente trovato</td></tr>';
             return;
         }
-        
-        for (let i = start; i < arr.length; i++) {
-            combo.push(arr[i]);
-            combine(i + 1, combo);
-            combo.pop();
-        }
+
+        snapshot.forEach(doc => {
+            const user = doc.data();
+            const email = doc.id;
+            const row = document.createElement('tr');
+            row.className = 'editable-rate';
+            
+            // Format role display
+            let roleDisplay = user.role;
+            if (user.role === 'admin') roleDisplay = 'Amministratore';
+            else if (user.role === 'god') roleDisplay = 'Utente GOD';
+            else if (user.role === 'user') roleDisplay = 'Utente';
+            
+            row.innerHTML = `
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${email}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.name}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${roleDisplay}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">${user.userNumber || 'N/A'}</td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    ${user.mustChangePassword ? '<span class="text-red-600">No</span>' : '<span class="text-green-600">Sì</span>'}
+                </td>
+                <td class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    <button onclick="resetUserPassword('${email}')" class="text-blue-600 hover:text-blue-800 mr-2" title="Reset Password">
+                        <i class="fas fa-key"></i>
+                    </button>
+                    <button onclick="deleteUser('${email}')" class="text-red-600 hover:text-red-800 ${user.role === 'admin' ? 'hidden' : ''}" title="Elimina Utente">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error loading users from Firestore:', error);
+        tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-red-500">Errore nel caricamento utenti</td></tr>';
     }
-    
-    combine(0, []);
-    return result;
 }
 
-// Display combination results
-function displayCombinations(combinations) {
-    const resultsDiv = document.getElementById('results');
-    const resultsContent = document.getElementById('resultsContent');
-    const errorsDiv = document.getElementById('errors');
-    const errorsContent = document.getElementById('errorsContent');
+function addNewUser() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
     
-    resultsDiv.classList.remove('hidden');
-    errorsDiv.classList.add('hidden');
-    
-    if (combinations.length === 0) {
-        resultsContent.innerHTML = `
-            <p>Nessuna combinazione valida trovata.</p>
-            <p class="text-sm mt-2">I magazzini non possono essere combinati in modo efficiente con i mezzi disponibili.</p>
-        `;
-        return;
-    }
-    
-    let html = '<p class="font-semibold mb-3">Combinazioni ottimali trovate:</p>';
-    
-    combinations.forEach((combo, index) => {
-        const isSelected = index === 0 ? 'border-green-500' : 'border-white/20';
-        
-        if (combo.type === 'single') {
-            html += `
-                <div class="bg-white/10 rounded-lg p-3 mb-2 cursor-pointer hover:bg-white/20 transition border ${isSelected}" onclick="visualizeCombination(${index})">
-                    <p class="font-semibold text-green-300">💡 Opzione ${index + 1} (clicca per visualizzare)</p>
-                    <p><strong>🚚 Mezzo unico:</strong> ${combo.warehouses}</p>
-                    <p><strong>Pallet totali:</strong> ${combo.numPallets}</p>
-                    <p><strong>Peso:</strong> ${(combo.totalWeight / 1000).toFixed(2)}t</p>
-                    <p><strong>Metri lineari:</strong> ${combo.linearMeters.toFixed(1)}m</p>
-                    <p class="text-green-300"><strong>Risparmio:</strong> ${combo.savedTrucks} trasporto/i</p>
+    content.innerHTML = `
+        <form id="newUserForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Aggiungi Nuovo Utente</h4>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Email</label>
+                    <input type="email" id="newUserEmail" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="email@example.com">
                 </div>
-            `;
+                <div class="md:col-span-2">
+                    <label class="block text-sm font-medium text-gray-700">Nome</label>
+                    <input type="text" id="newUserName" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Nome Cognome">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Ruolo</label>
+                    <select id="newUserRole" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" onchange="updateRoleDescription()">
+                        <option value="user">Utente</option>
+                        <option value="admin">Amministratore</option>
+                        <option value="god">Utente GOD</option>
+                    </select>
+                    <div id="roleDescription" class="mt-2 text-xs text-gray-600">
+                        Utente normale: può vedere solo le proprie spedizioni
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700">Numero Utente</label>
+                    <input type="number" id="newUserNumber" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Numero utente (es. 1, 2, 3...)" min="1">
+                </div>
+            </div>
+            
+            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                <p class="text-sm text-yellow-800">
+                    <i class="fas fa-info-circle mr-2"></i>
+                    L'utente avrà password temporanea "123456" e dovrà cambiarla al primo accesso.
+                </p>
+            </div>
+            
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-plus mr-2"></i> Aggiungi Utente
+                </button>
+            </div>
+        </form>
+    `;
+    
+    modal.classList.remove('hidden');
+    
+    // Initialize role description
+    updateRoleDescription();
+    
+    document.getElementById('newUserForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveNewUser();
+    });
+}
+
+function updateRoleDescription() {
+    const role = document.getElementById('newUserRole').value;
+    const description = document.getElementById('roleDescription');
+    
+    switch(role) {
+        case 'user':
+            description.textContent = 'Utente normale: può vedere solo le proprie spedizioni';
+            break;
+        case 'admin':
+            description.textContent = 'Amministratore: può vedere e gestire tutte le spedizioni';
+            break;
+        case 'god':
+            description.textContent = 'Utente GOD: può vedere tutte le spedizioni come admin, ma in sola lettura (visualizzazione con nome cliente)';
+            break;
+    }
+}
+
+async function saveNewUser() {
+    const email = document.getElementById('newUserEmail').value;
+    const name = document.getElementById('newUserName').value;
+    const role = document.getElementById('newUserRole').value;
+    const userNumber = document.getElementById('newUserNumber').value;
+
+    try {
+        // Check if user already exists in Firestore
+        const userDoc = await db.collection('users').doc(email).get();
+        if (userDoc.exists) {
+            showNotification('Utente con questa email già esistente!', 'error');
+            return;
+        }
+
+        // Create user in Firebase Auth with default password
+        const userCredential = await auth.createUserWithEmailAndPassword(email, '123456');
+        console.log('Firebase Auth user created');
+
+        // Save additional user data to Firestore
+        await db.collection('users').doc(email).set({
+            name: name,
+            role: role,
+            mustChangePassword: true,
+            userNumber: parseInt(userNumber),
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        console.log('Firestore user data saved');
+
+        // Sign out after creation
+        await auth.signOut();
+        console.log('Signed out');
+
+        closeRateModal();
+        loadUsersTable();
+        showNotification(`Utente ${email} creato con successo! Password temporanea: 123456 (dovrà essere cambiata al primo accesso).`, 'success');
+    } catch (error) {
+        console.error('Error creating user:', error);
+        if (error.code === 'auth/email-already-in-use') {
+            showNotification('Utente con questa email già esistente in Firebase Authentication!', 'error');
         } else {
-            html += `
-                <div class="bg-white/10 rounded-lg p-3 mb-2 cursor-pointer hover:bg-white/20 transition border ${isSelected}" onclick="visualizeCombination(${index})">
-                    <p class="font-semibold text-blue-300">🚚 Opzione ${index + 1} (clicca per visualizzare)</p>
-                    <p><strong>Numero mezzi:</strong> ${combo.numTrucks}</p>
-                    ${combo.trucks.map((truck, i) => `
-                        <p><strong>🚚 Mezzo ${i + 1}:</strong> ${truck.warehouses}</p>
-                        <p class="text-sm text-white/60">- ${truck.pallets} pallet | ${truck.linearMeters ? truck.linearMeters.toFixed(1) + 'm lineari' : ''}</p>
-                    `).join('')}
-                    <p><strong>Pallet totali:</strong> ${combo.totalPallets}</p>
-                </div>
-            `;
+            showNotification('Errore nella creazione utente: ' + error.message, 'error');
         }
-    });
-    
-    resultsContent.innerHTML = html;
-    
-    // Store combinations for visualization
-    window.combinations = combinations;
+    }
 }
 
-// Visualize a specific combination
-function visualizeCombination(index) {
-    const combo = window.combinations[index];
-    if (!combo) return;
-    
-    // Store current multi-view state before switching
-    if (!previousMultiView) {
-        previousMultiView = {
-            palletData: collectAllPalletData(),
-            truckPositions: window.truckPositions ? [...window.truckPositions] : null
-        };
+async function deleteUser(email) {
+    try {
+        // Get user data first to check role
+        const userDoc = await db.collection('users').doc(email).get();
+        if (!userDoc.exists) {
+            showNotification('Utente non trovato!', 'error');
+            return;
+        }
+
+        const userData = userDoc.data();
+        if (userData.role === 'admin') {
+            showNotification('Non puoi eliminare un amministratore!', 'error');
+            return;
+        }
+
+        if (confirm(`Sei sicuro di voler eliminare l'utente ${email}?`)) {
+            // Delete from Firestore
+            await db.collection('users').doc(email).delete();
+
+            // Note: Firebase Auth requires Admin SDK to delete users from server-side
+            // For now, users need to be deleted manually from Firebase Console
+            // Go to: Firebase Console -> Authentication -> Users -> Click user -> Delete
+
+            loadUsersTable();
+            showNotification(`Utente ${email} eliminato da Firestore! Per eliminare completamente l'utente, vai su Firebase Console -> Authentication -> Users e cancellalo manualmente.`, 'success');
+        }
+    } catch (error) {
+        console.error('Error deleting user:', error);
+        showNotification('Errore nell\'eliminazione utente: ' + error.message, 'error');
+    }
+}
+
+async function resetUserPassword(email) {
+    try {
+        if (confirm(`Sei sicuro di voler resettare la password di ${email}? L'utente dovrà cambiarla al prossimo accesso.`)) {
+            // Update mustChangePassword in Firestore
+            await db.collection('users').doc(email).update({
+                mustChangePassword: true
+            });
+
+            // Note: We cannot reset the actual Firebase Auth password without Admin SDK
+            // The user will need to use Firebase Console's "Reset Password" feature
+            // Or we can implement email-based password reset
+
+            loadUsersTable();
+            showNotification(`Flag cambio password impostato per ${email}. Usa Firebase Console per resettare la password.`, 'success');
+        }
+    } catch (error) {
+        console.error('Error resetting user password:', error);
+        showNotification('Errore nel reset password: ' + error.message, 'error');
+    }
+}
+
+// Password Change Functions
+function showChangePasswordModal() {
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    const modalTitle = modal.querySelector('h3');
+
+    // Update modal title
+    if (modalTitle) {
+        modalTitle.textContent = 'Modifica Password Iniziale';
+    }
+
+    content.innerHTML = `
+        <form id="changePasswordForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Cambia Password</h4>
+                <p class="text-sm text-gray-600 mt-2">Devi cambiare la password al primo accesso.</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Nuova Password</label>
+                <input type="password" id="newPassword" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Nuova password">
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Conferma Password</label>
+                <input type="password" id="confirmPassword" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="Conferma password">
+            </div>
+
+            <div class="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                <p class="text-sm text-blue-800 font-semibold mb-2">Requisiti password:</p>
+                <ul class="text-sm text-blue-700 list-disc list-inside">
+                    <li>Minimo 8 caratteri</li>
+                    <li>Almeno una lettera maiuscola</li>
+                    <li>Almeno una lettera minuscola</li>
+                    <li>Almeno un numero</li>
+                </ul>
+            </div>
+
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition">
+                    <i class="fas fa-save mr-2"></i> Cambia Password
+                </button>
+            </div>
+        </form>
+    `;
+
+    modal.classList.remove('hidden');
+
+    document.getElementById('changePasswordForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        changePassword();
+    });
+}
+
+function validatePassword(password) {
+    // Minimo 8 caratteri
+    if (password.length < 8) {
+        return { valid: false, message: 'La password deve avere almeno 8 caratteri' };
     }
     
-    // Clear previous visualization
-    clearScene();
-    
-    const palletData = collectAllPalletData();
-    
-    if (combo.type === 'single') {
-        // Single truck visualization
-        const warehouseNames = combo.warehouses.split(' + ');
-        const warehouseIds = warehouseNames.map(name => {
-            const warehouse = warehouses.find(w => w.name === name);
-            return warehouse ? warehouse.id : null;
-        }).filter(id => id !== null);
-        
-        const combinedPallets = [];
-        warehouseIds.forEach(whId => {
-            const warehousePallets = palletData.filter(p => p.warehouseId === whId);
-            combinedPallets.push(...warehousePallets);
-        });
-        
-        const { placedPallets } = packPallets(combinedPallets, true);
-        
-        let maxLinearMeter = 0;
-        placedPallets.forEach(p => {
-            const endPosition = p.x + (p.rotated ? p.width : p.length);
-            if (endPosition > maxLinearMeter) {
-                maxLinearMeter = endPosition;
-            }
-        });
-        
-        drawTruckBed(0, 0, `🚚 ${combo.warehouses}`, maxLinearMeter);
-        
-        const truckOffset = { x: 0, y: 0 };
-        placedPallets.forEach((pallet, i) => {
-            drawPallet(pallet, i, truckOffset);
-        });
-        
-        camera.position.set(TRUCK_LENGTH / 2 + 10, 15, 20);
-        controls.target.set(TRUCK_LENGTH / 2, TRUCK_HEIGHT / 2, TRUCK_WIDTH / 2);
-        controls.update();
-        
-        const resultsDiv = document.getElementById('results');
-        const resultsContent = document.getElementById('resultsContent');
-        const currentContent = resultsContent.innerHTML;
-        resultsContent.innerHTML = `
-            <div class="bg-green-500/20 rounded-lg p-3 mb-3 border border-green-500/30">
-                <p class="text-green-300 font-semibold">✅ Visualizzazione: ${combo.warehouses}</p>
-                <p class="text-green-200 text-sm">Metri lineari: ${maxLinearMeter.toFixed(1)}m | Pallet: ${placedPallets.length}/${combinedPallets.length}</p>
-            </div>
-            ${currentContent}
-        `;
-        
-        window.truckPositions = [{
-            x: TRUCK_LENGTH / 2,
-            name: combo.warehouses
-        }];
-    } else {
-        // Multi-truck visualization - show all trucks
-        let offsetX = 0;
-        const spacing = TRUCK_LENGTH + 5;
-        
-        combo.trucks.forEach((truck, truckIndex) => {
-            // Use the warehouseIds stored in the combination
-            const truckIds = truck.warehouseIds.map(id => parseInt(id));
-            
-            const truckPallets = [];
-            truckIds.forEach(whId => {
-                const warehousePallets = palletData.filter(p => p.warehouseId === whId);
-                truckPallets.push(...warehousePallets);
-            });
-            
-            const { placedPallets } = packPallets(truckPallets, true);
-            
-            let maxLinearMeter = 0;
-            placedPallets.forEach(p => {
-                const endPosition = p.x + (p.rotated ? p.width : p.length);
-                if (endPosition > maxLinearMeter) {
-                    maxLinearMeter = endPosition;
-                }
-            });
-            
-            drawTruckBed(offsetX, 0, `🚚 ${truck.warehouses}`, maxLinearMeter);
-            
-            const truckOffset = { x: offsetX, y: 0 };
-            placedPallets.forEach((pallet, i) => {
-                drawPallet(pallet, i, truckOffset);
-            });
-            
-            offsetX += spacing;
-        });
-        
-        // Adjust camera to see all trucks
-        const totalWidth = combo.trucks.length * spacing;
-        camera.position.set(totalWidth / 2 + 10, 25, 30);
-        controls.target.set(totalWidth / 2, TRUCK_HEIGHT / 2, TRUCK_WIDTH / 2);
-        controls.update();
-        
-        // Store truck positions for navigation
-        window.truckPositions = [];
-        combo.trucks.forEach((truck, i) => {
-            window.truckPositions.push({
-                x: i * spacing + TRUCK_LENGTH / 2,
-                name: truck.warehouses
-            });
-        });
-        
-        const resultsDiv = document.getElementById('results');
-        const resultsContent = document.getElementById('resultsContent');
-        const currentContent = resultsContent.innerHTML;
-        resultsContent.innerHTML = `
-            <div class="bg-blue-500/20 rounded-lg p-3 mb-3 border border-blue-500/30">
-                <p class="text-blue-300 font-semibold">✅ Visualizzazione: ${combo.numTrucks} mezzi</p>
-                ${combo.trucks.map((truck, i) => `
-                    <p class="text-blue-200 text-sm">🚚 Mezzo ${i + 1}: ${truck.warehouses} (${truck.pallets} pallet, ${truck.linearMeters.toFixed(1)}m)</p>
-                `).join('')}
-            </div>
-            ${currentContent}
-        `;
+    // Almeno una lettera maiuscola
+    if (!/[A-Z]/.test(password)) {
+        return { valid: false, message: 'La password deve contenere almeno una lettera maiuscola' };
     }
     
-    document.getElementById('returnToMultiBtn').classList.remove('hidden');
+    // Almeno una lettera minuscola
+    if (!/[a-z]/.test(password)) {
+        return { valid: false, message: 'La password deve contenere almeno una lettera minuscola' };
+    }
+    
+    // Almeno un numero
+    if (!/[0-9]/.test(password)) {
+        return { valid: false, message: 'La password deve contenere almeno un numero' };
+    }
+    
+    return { valid: true };
 }
 
-// Return to multi-warehouse view
-function returnToMultiView() {
-    if (!previousMultiView) return;
-    
-    // Restore multi-view
-    clearScene();
-    
-    const palletData = previousMultiView.palletData;
-    
-    // Group pallets by warehouse
-    const palletsByWarehouse = {};
-    palletData.forEach(p => {
-        if (!palletsByWarehouse[p.warehouseId]) {
-            palletsByWarehouse[p.warehouseId] = [];
-        }
-        palletsByWarehouse[p.warehouseId].push(p);
-    });
-    
-    // Draw each warehouse on a separate truck
-    let offsetX = 0;
-    const spacing = TRUCK_LENGTH + 5;
-    
-    Object.keys(palletsByWarehouse).forEach((warehouseId, index) => {
-        const warehousePallets = palletsByWarehouse[warehouseId];
-        const warehouseName = warehouses.find(w => w.id === parseInt(warehouseId))?.name || `M${warehouseId}`;
-        
-        const truckOffset = { x: offsetX, y: 0 };
-        const { placedPallets } = packPallets(warehousePallets);
-        
-        let maxLinearMeter = 0;
-        placedPallets.forEach(p => {
-            const endPosition = p.x + (p.rotated ? p.width : p.length);
-            if (endPosition > maxLinearMeter) {
-                maxLinearMeter = endPosition;
-            }
-        });
-        
-        drawTruckBed(offsetX, 0, `🏭 ${warehouseName}`, maxLinearMeter);
-        
-        placedPallets.forEach((pallet, i) => {
-            drawPallet(pallet, i, truckOffset);
-        });
-        
-        offsetX += spacing;
-    });
-    
-    // Adjust camera
-    const numTrucks = Object.keys(palletsByWarehouse).length;
-    const totalWidth = numTrucks * spacing;
-    camera.position.set(totalWidth / 2, 25, 30);
-    controls.target.set(totalWidth / 2, TRUCK_HEIGHT / 2, TRUCK_WIDTH / 2);
-    controls.update();
-    
-    window.truckPositions = previousMultiView.truckPositions;
-    
-    // Display results
-    displayResults(palletData);
-    
-    // Hide return button
-    document.getElementById('returnToMultiBtn').classList.add('hidden');
-    
-    // Clear stored state
-    previousMultiView = null;
-}
+async function changePassword() {
+    const newPassword = document.getElementById('newPassword').value;
+    const confirmPassword = document.getElementById('confirmPassword').value;
 
-// Save configuration to localStorage
-function saveConfiguration() {
-    const configName = document.getElementById('configName').value.trim();
-    if (!configName) {
-        alert('Inserisci un nome per la configurazione');
+    // Verifica che le password corrispondono
+    if (newPassword !== confirmPassword) {
+        showNotification('Le password non corrispondono!', 'error');
         return;
     }
 
-    const config = {
-        name: configName,
-        warehouses: []
+    // Valida la password
+    const validation = validatePassword(newPassword);
+    if (!validation.valid) {
+        showNotification(validation.message, 'error');
+        return;
+    }
+
+    try {
+        // Update password in Firebase Auth
+        const user = auth.currentUser;
+        await user.updatePassword(newPassword);
+
+        // Update mustChangePassword in Firestore
+        await db.collection('users').doc(currentUser.email).update({
+            mustChangePassword: false
+        });
+
+        // Update local state
+        currentUser.mustChangePassword = false;
+        localStorage.setItem('loggedInUser', JSON.stringify(currentUser));
+
+        closeRateModal();
+        showSection('calculator');
+        showNotification('Password cambiata con successo!', 'success');
+    } catch (error) {
+        console.error('Password change error:', error);
+        showNotification('Errore nel cambio password: ' + error.message, 'error');
+    }
+}
+
+// Saved Calculations Functions
+function saveCalculation() {
+    if (!currentCalculation) {
+        showNotification('Nessun calcolo da salvare', 'error');
+        return;
+    }
+    
+    const modal = document.getElementById('rateModal');
+    const content = document.getElementById('rateModalContent');
+    
+    content.innerHTML = `
+        <form id="saveCalculationForm" class="space-y-4">
+            <div class="mb-4">
+                <h4 class="text-lg font-semibold text-gray-800">Salva Calcolo</h4>
+            </div>
+            
+            <div>
+                <label class="block text-sm font-medium text-gray-700">Nome del calcolo</label>
+                <input type="text" id="calculationName" required class="w-full px-4 py-2 border border-gray-300 rounded-lg" placeholder="es. Spedizione Milano 50kg">
+            </div>
+            
+            <div class="flex justify-end space-x-4 pt-4 border-t">
+                <button type="button" onclick="closeRateModal()" class="bg-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-400 transition">
+                    Annulla
+                </button>
+                <button type="submit" class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 transition">
+                    <i class="fas fa-save mr-2"></i> Salva
+                </button>
+            </div>
+        </form>
+    `;
+    
+    modal.classList.remove('hidden');
+    
+    document.getElementById('saveCalculationForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        saveCalculationWithName();
+    });
+}
+
+function saveCalculationWithName() {
+    const name = document.getElementById('calculationName').value;
+    
+    // Get saved calculations from localStorage
+    const savedCalculations = JSON.parse(localStorage.getItem('savedCalculations') || '[]');
+    
+    // Create new calculation entry
+    const newCalculation = {
+        id: Date.now().toString(),
+        name: name,
+        email: currentUser.email,
+        date: new Date().toISOString(),
+        data: currentCalculation
     };
-
-    // Collect warehouse and pallet data
-    warehouses.forEach((wh, whIndex) => {
-        const warehouseEl = document.getElementById(`warehouse-${whIndex}`);
-        if (!warehouseEl) return;
-
-        const nameInput = warehouseEl.querySelector('.warehouse-name');
-        const whName = nameInput ? nameInput.value : wh.name;
-
-        const warehouseData = {
-            name: whName,
-            pallets: []
-        };
-
-        const palletRows = warehouseEl.querySelectorAll('.pallet-row');
-        palletRows.forEach(row => {
-            const quantity = parseInt(row.querySelector('.pallet-qty').value) || 1;
-            const length = parseFloat(row.querySelector('.pallet-length').value) || 0;
-            const width = parseFloat(row.querySelector('.pallet-width').value) || 0;
-            const height = parseFloat(row.querySelector('.pallet-height').value) || 0;
-            const weight = parseFloat(row.querySelector('.pallet-weight').value) || 0;
-            const stackable = row.querySelector('.pallet-stackable').checked;
-
-            if (length > 0 && width > 0 && height > 0) {
-                warehouseData.pallets.push({
-                    quantity,
-                    length,
-                    width,
-                    height,
-                    weight,
-                    stackable
-                });
-            }
-        });
-
-        config.warehouses.push(warehouseData);
-    });
-
+    
+    // Add to saved calculations
+    savedCalculations.push(newCalculation);
+    
     // Save to localStorage
-    const savedConfigs = JSON.parse(localStorage.getItem('palgoConfigs') || '[]');
-    const existingIndex = savedConfigs.findIndex(c => c.name === configName);
-    if (existingIndex >= 0) {
-        savedConfigs[existingIndex] = config;
-    } else {
-        savedConfigs.push(config);
-    }
-    localStorage.setItem('palgoConfigs', JSON.stringify(savedConfigs));
-
-    document.getElementById('configName').value = '';
-    loadSavedConfigs();
-    alert('Configurazione salvata!');
+    localStorage.setItem('savedCalculations', JSON.stringify(savedCalculations));
+    
+    closeRateModal();
+    showNotification('Calcolo salvato con successo!', 'success');
 }
 
-// Load saved configurations
-function loadSavedConfigs() {
-    const savedConfigs = JSON.parse(localStorage.getItem('palgoConfigs') || '[]');
-    const container = document.getElementById('savedConfigs');
-
-    if (savedConfigs.length === 0) {
-        container.innerHTML = '<p class="text-white/50 text-sm">Nessuna configurazione salvata</p>';
+function loadSavedCalculations() {
+    const savedCalculations = JSON.parse(localStorage.getItem('savedCalculations') || '[]');
+    const userCalculations = savedCalculations.filter(calc => calc.email === currentUser.email);
+    
+    const listDiv = document.getElementById('savedCalculationsList');
+    const noSavedDiv = document.getElementById('noSavedCalculations');
+    
+    if (userCalculations.length === 0) {
+        listDiv.innerHTML = '';
+        noSavedDiv.classList.remove('hidden');
         return;
     }
-
-    container.innerHTML = savedConfigs.map((config, index) => `
-        <div class="flex items-center justify-between bg-white/5 rounded px-3 py-2">
-            <span class="text-white text-sm">${config.name}</span>
-            <div class="flex gap-2">
-                <button onclick="loadConfiguration(${index})" class="text-blue-400 hover:text-blue-300 text-xs">Carica</button>
-                <button onclick="deleteConfiguration(${index})" class="text-red-400 hover:text-red-300 text-xs">Elimina</button>
-            </div>
-        </div>
-    `).join('');
-}
-
-// Load a specific configuration
-function loadConfiguration(index) {
-    const savedConfigs = JSON.parse(localStorage.getItem('palgoConfigs') || '[]');
-    const config = savedConfigs[index];
-    if (!config) return;
-
-    // Clear current warehouses
-    warehouses = [];
-    document.getElementById('warehousesForm').innerHTML = '';
-
-    // Recreate warehouses
-    config.warehouses.forEach((whData, whIndex) => {
-        addWarehouse();
-        warehouses[whIndex].name = whData.name;
-
-        const warehouseEl = document.getElementById(`warehouse-${whIndex}`);
-        const nameInput = warehouseEl.querySelector('.warehouse-name');
-        if (nameInput) {
-            nameInput.value = whData.name;
-            nameInput.onchange = (e) => updateWarehouseName(whIndex, e.target.value);
-        }
-
-        // Remove default pallet row
-        const defaultRow = warehouseEl.querySelector('.pallet-row');
-        if (defaultRow) defaultRow.remove();
-
-        // Add pallet rows from config
-        whData.pallets.forEach(palletData => {
-            addPalletRow(whIndex);
-            const rows = warehouseEl.querySelectorAll('.pallet-row');
-            const lastRow = rows[rows.length - 1];
-            lastRow.querySelector('.pallet-qty').value = palletData.quantity;
-            lastRow.querySelector('.pallet-length').value = palletData.length;
-            lastRow.querySelector('.pallet-width').value = palletData.width;
-            lastRow.querySelector('.pallet-height').value = palletData.height;
-            lastRow.querySelector('.pallet-weight').value = palletData.weight;
-            lastRow.querySelector('.pallet-stackable').checked = palletData.stackable;
+    
+    noSavedDiv.classList.add('hidden');
+    listDiv.innerHTML = '';
+    
+    userCalculations.forEach(calc => {
+        const date = new Date(calc.date).toLocaleDateString('it-IT', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit'
         });
+        
+        const card = document.createElement('div');
+        card.className = 'bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10';
+        card.innerHTML = `
+            <div class="flex justify-between items-start">
+                <div class="flex-1">
+                    <h4 class="text-lg font-semibold text-white mb-2">${calc.name}</h4>
+                    <div class="text-sm text-white/60 space-y-1">
+                        <p><i class="fas fa-map-marker-alt mr-2"></i>${calc.data.result.provincia}</p>
+                        <p><i class="fas fa-weight-hanging mr-2"></i>${calc.data.result.peso} kg</p>
+                        <p><i class="fas fa-calendar mr-2"></i>${date}</p>
+                        <p class="mt-2 text-lg font-bold text-green-400">Totale: € ${Math.round(calc.data.result.totale)}</p>
+                    </div>
+                </div>
+                <div class="flex space-x-2 ml-4">
+                    <button onclick="loadCalculation('${calc.id}')" class="bg-blue-600 text-white px-3 py-2 rounded-lg hover:bg-blue-700 transition" title="Carica Calcolo">
+                        <i class="fas fa-upload"></i>
+                    </button>
+                    <button onclick="deleteSavedCalculation('${calc.id}')" class="bg-red-600 text-white px-3 py-2 rounded-lg hover:bg-red-700 transition" title="Elimina">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        listDiv.appendChild(card);
     });
-
-    alert('Configurazione caricata!');
 }
 
-// Delete a configuration
-function deleteConfiguration(index) {
-    if (!confirm('Sei sicuro di voler eliminare questa configurazione?')) return;
+function loadCalculation(id) {
+    const savedCalculations = JSON.parse(localStorage.getItem('savedCalculations') || '[]');
+    const calculation = savedCalculations.find(calc => calc.id === id);
+    
+    if (!calculation) {
+        showNotification('Calcolo non trovato', 'error');
+        return;
+    }
+    
+    const data = calculation.data;
 
-    const savedConfigs = JSON.parse(localStorage.getItem('palgoConfigs') || '[]');
-    savedConfigs.splice(index, 1);
-    localStorage.setItem('palgoConfigs', JSON.stringify(savedConfigs));
-    loadSavedConfigs();
+    // Load parameters into form
+    selectedProvincia = data.provincia;
+    const provinciaData = tariffeProvinciali[data.provincia];
+    if (provinciaData) {
+        document.getElementById('provincia').value = `${provinciaData.nome} - ${provinciaData.sigla}`;
+    } else {
+        document.getElementById('provincia').value = data.provincia;
+    }
+    document.getElementById('peso').value = data.peso;
+    document.getElementById('sponda').value = data.sponda;
+    document.getElementById('batteria').value = data.batteria;
+    document.getElementById('fascio').value = data.fascio;
+    document.getElementById('palletSfuso').value = data.palletSfuso;
+    document.getElementById('numeroRighe').value = data.numeroRighe;
+    
+    // Set current calculation
+    currentCalculation = data;
+    
+    // Display the result
+    displayCalculationResult(data.result);
+    
+    // Show action buttons
+    document.getElementById('actionButtons').classList.remove('hidden');
+    
+    // Switch to calculator section
+    showSection('calculator');
+    
+    showNotification('Calcolo caricato con successo!', 'success');
+}
+
+function deleteSavedCalculation(id) {
+    if (!confirm('Sei sicuro di voler eliminare questo calcolo?')) {
+        return;
+    }
+    
+    const savedCalculations = JSON.parse(localStorage.getItem('savedCalculations') || '[]');
+    const filteredCalculations = savedCalculations.filter(calc => calc.id !== id);
+    
+    localStorage.setItem('savedCalculations', JSON.stringify(filteredCalculations));
+    
+    loadSavedCalculations();
+    showNotification('Calcolo eliminato con successo!', 'success');
+}
+
+function showNotification(message, type = 'info') {
+    const notification = document.createElement('div');
+    notification.className = `fixed top-4 right-4 px-6 py-3 rounded-lg shadow-lg z-50 fade-in ${
+        type === 'success' ? 'bg-green-500 text-white' :
+        type === 'error' ? 'bg-red-500 text-white' :
+        type === 'warning' ? 'bg-yellow-500 text-white' :
+        'bg-blue-500 text-white'
+    }`;
+    notification.innerHTML = `
+        <div class="flex items-center">
+            <i class="fas ${
+                type === 'success' ? 'fa-check-circle' :
+                type === 'error' ? 'fa-exclamation-circle' :
+                type === 'warning' ? 'fa-exclamation-triangle' :
+                'fa-info-circle'
+            } mr-2"></i>
+            ${message}
+        </div>
+    `;
+    
+    document.body.appendChild(notification);
+    
+    setTimeout(() => {
+        notification.remove();
+    }, 5000); // Longer timeout for warnings
 }
