@@ -329,10 +329,21 @@ function isDeliveredMoreThan10Days(shipment) {
 
     const deliveryDate = new Date(shipment.dataConsegna);
     const today = new Date();
-    const diffTime = Math.abs(today - deliveryDate);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Count business days (excluding weekends)
+    let businessDays = 0;
+    let currentDate = new Date(deliveryDate);
+    
+    while (currentDate <= today) {
+        const dayOfWeek = currentDate.getDay();
+        // 0 = Sunday, 6 = Saturday
+        if (dayOfWeek !== 0 && dayOfWeek !== 6) {
+            businessDays++;
+        }
+        currentDate.setDate(currentDate.getDate() + 1);
+    }
 
-    return diffDays > 10;
+    return businessDays > 5;
 }
 
 function isShipmentStuckTooLong(shipment) {
@@ -1002,7 +1013,7 @@ function editShipment(id) {
     // Check if user is admin for delivered shipments >10 days
     if (isDeliveredMoreThan10Days(shipment)) {
         if (!currentUser || currentUser.role !== 'admin') {
-            showNotification('Solo gli amministratori possono modificare spedizioni consegnate da più di 10 giorni', 'error');
+            showNotification('Solo gli amministratori possono modificare spedizioni consegnate da più di 5 giorni lavorativi', 'error');
             return;
         }
     }
@@ -1175,7 +1186,7 @@ async function deleteShipment(id) {
     // Check if user is admin for delivered shipments >10 days
     if (isDeliveredMoreThan10Days(shipment)) {
         if (!currentUser || currentUser.role !== 'admin') {
-            showNotification('Solo gli amministratori possono eliminare spedizioni consegnate da più di 10 giorni', 'error');
+            showNotification('Solo gli amministratori possono eliminare spedizioni consegnate da più di 5 giorni lavorativi', 'error');
             return;
         }
     }
